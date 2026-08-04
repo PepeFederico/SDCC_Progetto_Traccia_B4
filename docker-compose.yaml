@@ -1,0 +1,57 @@
+services:
+  # ----------------------------
+  # Broker Kafka
+  # ----------------------------
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    ports:
+      - "9096:9096"
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9096,CONTROLLER://kafka:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9096,EXTERNAL://127.0.0.1:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9096"
+      CLUSTER_ID: "4L62IdtzT-makk48j9YgAg"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+      # --- Tuning ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 4
+      KAFKA_HEAP_OPTS: "-Xmx1G -Xms1G"
+      KAFKA_REQUEST_TIMEOUT_MS: 60000
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 3000
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9096"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Setup Kafka (Creazione Topic)
+  # ----------------------------
+  init-kafka:
+    image: apache/kafka:3.9.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/init-kafka.sh"]
+    volumes:
+      - ./kafka/init-kafka.sh:/init-kafka.sh:ro
+    networks:
+      - sdcc_progetto
+
+networks:
+  sdcc_progetto:
+    driver: bridge
