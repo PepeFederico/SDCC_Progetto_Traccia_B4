@@ -17,6 +17,9 @@ import (
 func generateULID() string {
 	return ulid.Make().String()
 }
+func randomRange(min, max int) int {
+	return min + rand.IntN(max-min+1)
+}
 
 func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, modeChan <-chan config.StateCommand, kafkaWriter *kafka.Writer) {
 	defer machineRegistry.Delete(cfg.SensorID)
@@ -43,7 +46,13 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 			switch cmd.Mode {
 			case config.ModeStop:
 				fmt.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
-				return
+
+				//	Simulazione riparazione guasto
+				var timeout = randomRange(30, 120)
+				time.Sleep(time.Duration(timeout) * time.Second)
+
+				//	Ripristino corretto funzionamento
+				currentMode = config.ModeNormal
 			case config.ModeDrift:
 				driftRate = cmd.DriftRate
 			case config.ModeSpike:
@@ -109,7 +118,13 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 			switch cmd.Mode {
 			case config.ModeStop:
 				fmt.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
-				return
+
+				//	Simulazione riparazione guasto
+				var timeout = randomRange(30, 120)
+				time.Sleep(time.Duration(timeout) * time.Second)
+
+				//	Ripristino corretto funzionamento
+				currentMode = config.ModeNormal
 			case config.ModeDrift:
 				driftRate = cmd.DriftRate
 			case config.ModeSpike:
