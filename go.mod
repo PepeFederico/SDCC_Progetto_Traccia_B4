@@ -2,7 +2,10 @@ module progettoSDCC
 
 go 1.24
 
-require github.com/segmentio/kafka-go v0.4.51
+require (
+	github.com/oklog/ulid/v2 v2.1.2
+	github.com/segmentio/kafka-go v0.4.51
+)
 
 require (
 	github.com/klauspost/compress v1.15.9 // indirect
