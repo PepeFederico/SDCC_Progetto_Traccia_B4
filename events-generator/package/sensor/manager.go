@@ -1,7 +1,7 @@
 package sensor
 
 import (
-	"fmt"
+	"log"
 	"sync"
 
 	"progettoSDCC/events-generator/package/config"
@@ -27,9 +27,21 @@ func StartSensor(cfg config.SensorConfig, stopChan <-chan struct{}, kafkaWriter 
 
 func SendControlCommand(machineID string, cmd config.StateCommand) bool {
 	if ch, ok := machineRegistry.Load(machineID); ok {
+		log.Printf("[DEBUG MANAGER] Inoltro comando %+v al sensore %s", cmd, machineID)
 		ch.(chan config.StateCommand) <- cmd
 		return true
 	}
-	fmt.Printf("Macchina %s non trovata nel registro\n", machineID)
+	log.Printf("[DEBUG MANAGER] Sensore %s NON trovato nel registro", machineID)
 	return false
+}
+
+func GetActiveSensors() []string {
+	var sensors []string
+	machineRegistry.Range(func(key, value any) bool {
+		if sensorID, ok := key.(string); ok {
+			sensors = append(sensors, sensorID)
+		}
+		return true
+	})
+	return sensors
 }

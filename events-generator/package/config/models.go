@@ -5,13 +5,13 @@ import (
 )
 
 // OperationalMode : Definisce i possibili stati del sensore
-type OperationalMode int
+type OperationalMode string
 
 const (
-	ModeNormal OperationalMode = iota //	Funzionamento operativo standard
-	ModeSpike                         //	Genera un singolo picco anomalo e torna Normal
-	ModeDrift                         //	Degrado progressivo del trend --> Simulazione anomalia
-	ModeStop                          //	Interruzione Forzata Macchinario
+	ModeNormal OperationalMode = "ModeNormal"
+	ModeDrift  OperationalMode = "ModeDrift"
+	ModeSpike  OperationalMode = "ModeSpike"
+	ModeStop   OperationalMode = "ModeStop"
 )
 
 // SensorConfig : Definisce la configurazione iniziale di un sensore
@@ -31,9 +31,10 @@ type SensorConfig struct {
 
 // StateCommand : Rappresenta un messaggio di controllo/cambio stato
 type StateCommand struct {
-	Mode           OperationalMode
-	DriftRate      float64
-	SpikeMagnitude float64
+	Mode           OperationalMode `json:"mode"`
+	DriftRate      float64         `json:"driftRate"`
+	SpikeMagnitude float64         `json:"spikeMagnitude"`
+	SensorID       string          `json:"sensorId"`
 }
 
 // TemperatureReading : Rappresenta la lettura telemetrica inviata dal sensore

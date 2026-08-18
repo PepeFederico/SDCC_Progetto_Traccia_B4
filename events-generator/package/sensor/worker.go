@@ -42,6 +42,8 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 			return
 
 		case cmd := <-modeChan:
+			fmt.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
+				cfg.MachineToControl, cfg.SensorID, cmd.Mode, cmd.SpikeMagnitude, cmd.DriftRate)
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
@@ -60,15 +62,21 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 			default:
 				currentMean = cfg.BaseMean
 				driftRate = 0.0
+				spikeValue = 0.0
 			}
 
 		case <-ticker.C:
+			if currentMode == config.ModeStop {
+				continue
+			}
+
 			noise := stdDev * rand.NormFloat64()
 			switch currentMode {
 			case config.ModeDrift:
 				currentMean += driftRate
 			case config.ModeSpike:
 				noise += spikeValue
+				spikeValue = 0.0
 				currentMode = config.ModeNormal
 			default:
 
@@ -114,6 +122,8 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 			return
 
 		case cmd := <-modeChan:
+			fmt.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
+				cfg.MachineToControl, cfg.SensorID, cmd.Mode, cmd.SpikeMagnitude, cmd.DriftRate)
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
@@ -132,15 +142,21 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 			default:
 				currentMean = cfg.BaseMean
 				driftRate = 0.0
+				spikeValue = 0.0
 			}
 
 		case <-ticker.C:
+			if currentMode == config.ModeStop {
+				continue
+			}
+
 			noise := stdDev * rand.NormFloat64()
 			switch currentMode {
 			case config.ModeDrift:
 				currentMean += driftRate
 			case config.ModeSpike:
 				noise += spikeValue
+				spikeValue = 0.0
 				currentMode = config.ModeNormal
 			default:
 
