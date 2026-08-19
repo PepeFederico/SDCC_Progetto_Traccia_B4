@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"math/rand/v2"
 	"time"
@@ -32,34 +33,47 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 	currentMean := cfg.BaseMean
 	driftRate := 0.0
 	spikeValue := 0.0
+	var payload config.TemperatureReading
 
 	fmt.Printf("[Macchina: %s -- Sensore: %s] Avvio monitoraggio (Media: %.2f°C)\n", cfg.MachineToControl, cfg.SensorID, cfg.BaseMean)
 
 	for {
 		select {
 		case <-stopChan:
-			fmt.Printf("[%s] Arresto sensore.\n", cfg.SensorID)
+			log.Printf("[%s] Arresto sensore.\n", cfg.SensorID)
 			return
 
 		case cmd := <-modeChan:
-			fmt.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
+			log.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
 				cfg.MachineToControl, cfg.SensorID, cmd.Mode, cmd.SpikeMagnitude, cmd.DriftRate)
+
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
-				fmt.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
+				log.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
 
-				//	Simulazione riparazione guasto
-				var timeout = randomRange(30, 120)
-				time.Sleep(time.Duration(timeout) * time.Second)
+				// Simulazione riparazione senza bloccare lo stopChan
+				timeout := time.Duration(randomRange(30, 120)) * time.Second
+				select {
+				case <-stopChan:
+					log.Printf("[%s] Arresto sensore durante la riparazione.\n", cfg.SensorID)
+					return
+				case <-time.After(timeout):
+					// Ripristino corretto funzionamento al termine della riparazione
+					currentMode = config.ModeNormal
+					currentMean = cfg.BaseMean
+					driftRate = 0.0
+					log.Printf("[%s] Ripristino corretto funzionamento!.\n", cfg.SensorID)
+				}
 
-				//	Ripristino corretto funzionamento
-				currentMode = config.ModeNormal
 			case config.ModeDrift:
 				driftRate = cmd.DriftRate
+
 			case config.ModeSpike:
 				spikeValue = cmd.SpikeMagnitude
-			default:
+
+			case config.ModeNormal:
+				// Reset esplicito ai valori base
 				currentMean = cfg.BaseMean
 				driftRate = 0.0
 				spikeValue = 0.0
@@ -78,25 +92,59 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 				noise += spikeValue
 				spikeValue = 0.0
 				currentMode = config.ModeNormal
-			default:
-
 			}
 
 			temp := currentMean + noise
-			payload := config.TemperatureReading{
-				MessageID:   generateULID(),
-				SensorID:    cfg.SensorID,
-				MachineID:   cfg.MachineToControl,
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				Temperature: math.Round(temp*100) / 100,
+			whatWeDo := rand.Float64()
+
+			if whatWeDo < 0.03 {
+				// CASO 1: Dato Corrotto
+				payload = config.TemperatureReading{
+					MessageID:   generateULID(),
+					SensorID:    cfg.SensorID,
+					MachineID:   cfg.MachineToControl,
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					Temperature: -999.99,
+				}
+
+			} else if whatWeDo < 0.08 {
+				// CASO 2: Picco Fuori Scala (Outlier)
+				outlierTemp := currentMean + (noise * 50)
+
+				payload = config.TemperatureReading{
+					MessageID:   generateULID(),
+					SensorID:    cfg.SensorID,
+					MachineID:   cfg.MachineToControl,
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					Temperature: math.Round(outlierTemp*100) / 100,
+				}
+
+			} else {
+				// CASO 3: Flusso Normale
+				payload = config.TemperatureReading{
+					MessageID:   generateULID(),
+					SensorID:    cfg.SensorID,
+					MachineID:   cfg.MachineToControl,
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					Temperature: math.Round(temp*100) / 100,
+				}
 			}
 
-			jsonBytes, _ := json.Marshal(payload)
+			jsonBytes, err := json.Marshal(payload)
+			if err != nil {
+				log.Printf("[%s] Errore serializzazione JSON: %v", cfg.SensorID, err)
+				continue
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			err = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
 			cancel()
 
-			fmt.Printf("Messaggio inviato: %s\n", string(jsonBytes))
+			if err != nil {
+				log.Printf("[%s] Errore invio Kafka: %v", cfg.SensorID, err)
+			} else {
+				fmt.Printf("Messaggio inviato: %s\n", string(jsonBytes))
+			}
 		}
 	}
 }
@@ -112,29 +160,37 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 	currentMean := cfg.BaseMean
 	driftRate := 0.0
 	spikeValue := 0.0
+	var payload config.PressureReading
 
 	fmt.Printf("[Macchina: %s -- Sensore: %s] Avvio monitoraggio (Media: %.2fBar)\n", cfg.MachineToControl, cfg.SensorID, cfg.BaseMean)
 
 	for {
 		select {
 		case <-stopChan:
-			fmt.Printf("[%s] Arresto sensore.\n", cfg.SensorID)
+			log.Printf("[%s] Arresto sensore.\n", cfg.SensorID)
 			return
 
 		case cmd := <-modeChan:
-			fmt.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
+			log.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
 				cfg.MachineToControl, cfg.SensorID, cmd.Mode, cmd.SpikeMagnitude, cmd.DriftRate)
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
-				fmt.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
+				log.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
 
-				//	Simulazione riparazione guasto
-				var timeout = randomRange(30, 120)
-				time.Sleep(time.Duration(timeout) * time.Second)
-
-				//	Ripristino corretto funzionamento
-				currentMode = config.ModeNormal
+				// Simulazione riparazione senza bloccare lo stopChan
+				timeout := time.Duration(randomRange(30, 120)) * time.Second
+				select {
+				case <-stopChan:
+					log.Printf("[%s] Arresto sensore durante la riparazione.\n", cfg.SensorID)
+					return
+				case <-time.After(timeout):
+					// Ripristino corretto funzionamento al termine della riparazione
+					currentMode = config.ModeNormal
+					currentMean = cfg.BaseMean
+					driftRate = 0.0
+					log.Printf("[%s] Ripristino corretto funzionamento!.\n", cfg.SensorID)
+				}
 			case config.ModeDrift:
 				driftRate = cmd.DriftRate
 			case config.ModeSpike:
@@ -163,20 +219,57 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 			}
 
 			temp := currentMean + noise
-			payload := config.PressureReading{
-				MessageID: generateULID(),
-				SensorID:  cfg.SensorID,
-				MachineID: cfg.MachineToControl,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Pressure:  math.Round(temp*100) / 100,
+			// 2. Estraiamo un singolo valore per decidere il tipo di evento
+			whatWeDo := rand.Float64()
+
+			if whatWeDo < 0.03 {
+				// CASO 1 (3% delle volte): Dato Corrotto (es. NaN)
+				payload = config.PressureReading{
+					MessageID: generateULID(),
+					SensorID:  cfg.SensorID,
+					MachineID: cfg.MachineToControl,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Pressure:  -999.99,
+				}
+
+			} else if whatWeDo < 0.08 {
+				// CASO 2 (5% delle volte, cioè tra 0.03 e 0.08): Picco Fuori Scala (Outlier)
+				outlierTemp := currentMean + (noise * 50) // Moltiplichiamo il rumore per generare un picco
+
+				payload = config.PressureReading{
+					MessageID: generateULID(),
+					SensorID:  cfg.SensorID,
+					MachineID: cfg.MachineToControl,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Pressure:  math.Round(outlierTemp*100) / 100,
+				}
+
+			} else {
+				// CASO 3 (92% delle volte): Flusso Normale
+				payload = config.PressureReading{
+					MessageID: generateULID(),
+					SensorID:  cfg.SensorID,
+					MachineID: cfg.MachineToControl,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Pressure:  math.Round(temp*100) / 100,
+				}
 			}
 
-			jsonBytes, _ := json.Marshal(payload)
+			jsonBytes, err := json.Marshal(payload)
+			if err != nil {
+				log.Printf("[%s] Errore serializzazione JSON: %v", cfg.SensorID, err)
+				continue
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			err = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
 			cancel()
 
-			fmt.Printf("Messaggio inviato: %s\n", string(jsonBytes))
+			if err != nil {
+				log.Printf("[%s] Errore invio Kafka: %v", cfg.SensorID, err)
+			} else {
+				fmt.Printf("Messaggio inviato: %s\n", string(jsonBytes))
+			}
 		}
 	}
 }

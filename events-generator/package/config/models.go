@@ -21,12 +21,12 @@ const (
 //	Variance	: Varianza
 //	Interval	: Rate di campionamento
 type SensorConfig struct {
-	SensorID         string
-	Type             string
-	MachineToControl string
-	BaseMean         float64
-	Variance         float64
-	Interval         time.Duration
+	SensorID         string        `json:"sensorId"`
+	Type             string        `json:"type"`
+	MachineToControl string        `json:"machineToControl"`
+	BaseMean         float64       `json:"baseMean"`
+	Variance         float64       `json:"variance"`
+	Interval         time.Duration `json:"interval"`
 }
 
 // StateCommand : Rappresenta un messaggio di controllo/cambio stato
