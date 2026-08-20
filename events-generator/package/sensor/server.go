@@ -116,10 +116,10 @@ func StartDashboardServer(port string, stopChan <-chan struct{}, topics *config.
 	http.Handle("/", http.FileServer(http.FS(subFS)))
 
 	// 5. Avvio del Server HTTP con Graceful Shutdown
-	server := &http.Server{Addr: "127.0.0.1:" + port}
+	server := &http.Server{Addr: ":" + port}
 
 	go func() {
-		log.Printf("[Dashboard] Server in ascolto su http://127.0.0.1:%s\n", port)
+		log.Printf("[Dashboard] Server in ascolto su http://localhost:%s\n", port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Errore avvio server dashboard: %v", err)
 		}
