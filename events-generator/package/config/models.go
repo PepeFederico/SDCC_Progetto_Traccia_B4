@@ -2,6 +2,8 @@ package config
 
 import (
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 // OperationalMode : Definisce i possibili stati del sensore
@@ -58,4 +60,18 @@ type PressureReading struct {
 type EmergencyCommand struct {
 	MachineID string          `json:"machineId"`
 	Command   OperationalMode `json:"command"`
+}
+
+type DashboardServer struct {
+	TempWriter   *kafka.Writer
+	PressWriter  *kafka.Writer
+	SignalWriter *kafka.Writer
+}
+
+func NewDashboardServer(temp, press, signal *kafka.Writer) *DashboardServer {
+	return &DashboardServer{
+		TempWriter:   temp,
+		PressWriter:  press,
+		SignalWriter: signal,
+	}
 }

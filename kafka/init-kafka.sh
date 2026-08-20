@@ -10,8 +10,13 @@ done
 echo "Kafka is ready. Creating topics..."
 
 # Creazione di events-topic (1 partizioni)
-echo "Creating topic: events-topic"
-/opt/kafka/bin/kafka-topics.sh --create --topic "events-topic" \
+echo "Creating topic: temperature-topic-sensor"
+/opt/kafka/bin/kafka-topics.sh --create --topic "temperature-topic-sensor" \
+  --bootstrap-server "$BROKER" \
+  --partitions 1 --replication-factor 1 --if-not-exists
+
+echo "Creating topic: pressure-topic-sensor"
+/opt/kafka/bin/kafka-topics.sh --create --topic "pressure-topic-sensor" \
   --bootstrap-server "$BROKER" \
   --partitions 1 --replication-factor 1 --if-not-exists
 

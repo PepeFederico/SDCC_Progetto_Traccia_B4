@@ -15,11 +15,15 @@ import (
 
 func main() {
 	broker := "127.0.0.1:9094"
-	telemetryTopic := "events-topic"
+	topicsKafka := []string{
+		"temperature-topic-sensor",
+		"pressure-topic-sensor",
+	}
 	signalTopic := "signals-topic"
 
 	// Inizializzazione Client Kafka
-	telemetryWriter := pkgKafka.NewWriter(broker, telemetryTopic)
+	temperatureWriter := pkgKafka.NewWriter(broker, topicsKafka[0])
+	pressureWriter := pkgKafka.NewWriter(broker, topicsKafka[1])
 	signalWriter := pkgKafka.NewWriter(broker, signalTopic)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,23 +43,37 @@ func main() {
 	}
 
 	for _, cfg := range baseSensors {
-		sensor.StartSensor(cfg, stopChan, telemetryWriter)
+		switch cfg.Type {
+		case "TemperatureSensor":
+			sensor.StartSensor(cfg, stopChan, temperatureWriter)
+		case "PressureSensor":
+			sensor.StartSensor(cfg, stopChan, pressureWriter)
+		}
 	}
 
-	sensor.StartDashboardServer("8081", stopChan, telemetryWriter)
+	dashServerWriter := config.NewDashboardServer(temperatureWriter, pressureWriter, signalWriter)
+
+	sensor.StartDashboardServer("8081", stopChan, dashServerWriter)
 
 	//time.Sleep(20 * time.Second)
 
 	// Simulazione invio segnale di stop via Kafka
 	//pkgKafka.SimulationReceiveMessage(signalWriter, "SN7F9A2K4L1X9W3")
 
-	// Shutdown
+	// Graceful Shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
 	fmt.Println("\nArresto applicazione...")
-	close(stopChan)
-	_ = telemetryWriter.Close()
+	close(stopChan) // Segnala a Sensori e Dashboard HTTP di fermarsi
+
+	// Dà il tempo alle goroutine di uscire dai loop prima di chiudere i socket TCP
+	time.Sleep(200 * time.Millisecond)
+
+	_ = temperatureWriter.Close()
+	_ = pressureWriter.Close()
 	_ = signalWriter.Close()
+
+	fmt.Println("Generatore di eventi arrestato correttamente.")
 }

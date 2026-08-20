@@ -1,8 +1,10 @@
 package sensor
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -10,14 +12,12 @@ import (
 	"time"
 
 	"progettoSDCC/events-generator/package/config"
-
-	"github.com/segmentio/kafka-go"
 )
 
 //go:embed web-page/*
 var webAssets embed.FS
 
-func StartDashboardServer(port string, stopChan <-chan struct{}, telemetryWriter *kafka.Writer) {
+func StartDashboardServer(port string, stopChan <-chan struct{}, topics *config.DashboardServer) {
 
 	// 1	Endpoint /api/sensors (GET & POST)
 	http.HandleFunc("/api/sensors", func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,16 @@ func StartDashboardServer(port string, stopChan <-chan struct{}, telemetryWriter
 				Interval:         time.Duration(req.IntervalNs),
 			}
 
-			StartSensor(cfg, stopChan, telemetryWriter)
+			switch cfg.Type {
+			case "TemperatureSensor":
+				StartSensor(cfg, stopChan, topics.TempWriter)
+			case "PressureSensor":
+				StartSensor(cfg, stopChan, topics.PressWriter)
+			default:
+				http.Error(w, "Tipo sensore non supportato", http.StatusBadRequest)
+				return
+			}
+
 			log.Printf("[DEBUG MANAGER] Starting nuovo Sensore! [Macchina: %s -- Sensore: %s]", req.MachineToControl, req.SensorID)
 
 			w.WriteHeader(http.StatusCreated)
@@ -106,11 +115,25 @@ func StartDashboardServer(port string, stopChan <-chan struct{}, telemetryWriter
 	// Registriamo il gestore per tutti gli altri percorsi statici
 	http.Handle("/", http.FileServer(http.FS(subFS)))
 
-	// 5	Avvio del Server HTTP
-	log.Printf("[Dashboard] Server in ascolto su http://127.0.0.1:%s\n", port)
+	// 5. Avvio del Server HTTP con Graceful Shutdown
+	server := &http.Server{Addr: "127.0.0.1:" + port}
+
 	go func() {
-		if err := http.ListenAndServe("127.0.0.1:"+port, nil); err != nil {
+		log.Printf("[Dashboard] Server in ascolto su http://127.0.0.1:%s\n", port)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Errore avvio server dashboard: %v", err)
+		}
+	}()
+
+	// Inizializza l'arresto pulito quando lo stopChan viene chiuso dal main
+	go func() {
+		<-stopChan
+		log.Println("[Dashboard] Arresto server HTTP in corso...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("[Dashboard] Errore durante lo shutdown HTTP: %v", err)
 		}
 	}()
 }
