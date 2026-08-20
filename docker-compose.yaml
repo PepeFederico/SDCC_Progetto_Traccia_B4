@@ -52,6 +52,25 @@ services:
     networks:
       - sdcc_progetto
 
+  # ----------------------------
+  # Generatore di Eventi (Go)
+  # ----------------------------
+  events-generator:
+    build:
+      context: .
+      dockerfile: ./events-generator/Dockerfile # <--- Specifica il percorso corretto
+    container_name: events_generator
+    restart: unless-stopped
+    ports:
+      - "8081:8081" # Espone la Dashboard HTTP
+    environment:
+      - KAFKA_BROKER=kafka:9096 # Usa la porta interna di Kafka
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully # Attende la creazione dei Topic
+    networks:
+      - sdcc_progetto
+
 networks:
   sdcc_progetto:
     driver: bridge

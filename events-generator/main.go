@@ -14,7 +14,10 @@ import (
 )
 
 func main() {
-	broker := "127.0.0.1:9094"
+	broker := os.Getenv("KAFKA_BROKER")
+	if broker == "" {
+		broker = "127.0.0.1:9094" // Fallback per l'esecuzione in locale senza Docker
+	}
 	topicsKafka := []string{
 		"temperature-topic-sensor",
 		"pressure-topic-sensor",
