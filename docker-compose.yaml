@@ -58,7 +58,7 @@ services:
   events-generator:
     build:
       context: .
-      dockerfile: ./events-generator/Dockerfile # <--- Specifica il percorso corretto
+      dockerfile: ./events-generator/Dockerfile
     container_name: events_generator
     restart: unless-stopped
     ports:
@@ -68,6 +68,25 @@ services:
     depends_on:
       init-kafka:
         condition: service_completed_successfully # Attende la creazione dei Topic
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Servizio --> Ingestion-Service (Go)
+  # ----------------------------
+  ingestion-service:
+    build:
+      context: ./services/ingestion-service
+      dockerfile: Dockerfile
+    container_name: ingestion_service
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKER=kafka:9096 # Usa la porta interna di Kafka
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully # Attende la creazione dei Topic
+      events-generator:
+        condition: service_started # Attende solo l'avvio e non la terminazione
     networks:
       - sdcc_progetto
 
