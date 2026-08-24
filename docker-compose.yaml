@@ -90,6 +90,54 @@ services:
     networks:
       - sdcc_progetto
 
+  # ----------------------------
+  # Database Time-Series (InfluxDB v2)
+  # ----------------------------
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword123
+      - DOCKER_INFLUXDB_INIT_ORG=sdcc_org
+      - DOCKER_INFLUXDB_INIT_BUCKET=telemetry
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8086/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Write Service (Go)
+  # ----------------------------
+  write-service:
+    build:
+      context: ./services/write-service
+      dockerfile: Dockerfile
+    container_name: write_service
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKER=kafka:9096
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=my-super-secret-token
+      - INFLUXDB_ORGANIZATION=sdcc_org
+      - INFLUXDB_BUCKET=telemetry
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+      influxdb:
+        condition: service_healthy
+    networks:
+      - sdcc_progetto
+
 networks:
   sdcc_progetto:
     driver: bridge
