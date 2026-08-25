@@ -138,6 +138,23 @@ services:
     networks:
       - sdcc_progetto
 
+  # ----------------------------
+  # Analyzer Service (Go)
+  # ----------------------------
+  analyzer-service:
+    build:
+      context: ./services/analyzer-service
+      dockerfile: Dockerfile
+    container_name: analyzer_service
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKER=kafka:9096
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+    networks:
+      - sdcc_progetto
+
 networks:
   sdcc_progetto:
     driver: bridge
