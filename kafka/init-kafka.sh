@@ -23,11 +23,13 @@ echo "Creating topic: pressure-topic-sensor"
 echo "Creating topic: data-topic-cleaned"
 /opt/kafka/bin/kafka-topics.sh --create --topic "data-topic-cleaned" \
   --bootstrap-server "$BROKER" \
-  --partitions 1 --replication-factor 1 --if-not-exists
-echo "All topics created."
+  --partitions 4 --replication-factor 1 --if-not-exists
 
 # Creazione dei topic dei segnali
 echo "Creating topic: signals-topic"
 /opt/kafka/bin/kafka-topics.sh --create --topic "signals-topic" \
   --bootstrap-server "$BROKER" \
   --partitions 1 --replication-factor 1 --if-not-exists
+
+echo "All topics created."
+
