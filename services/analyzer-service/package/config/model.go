@@ -13,6 +13,26 @@ type GenericTelemetry struct {
 	PressureBar        float64 `json:"pressure_bar,omitempty"`
 }
 
+type RedisParameter struct {
+	Address   string
+	Password  string
+	DefaultDB int
+}
+
+/*
+SensorState : 	Struct necessaria per la gestione del checkpointing della finestra
+
+	Non salviamo nello stato risultati parziali. Saranno ricalcolati nel momento dell'eventuale reload dello stato
+*/
+type SensorState struct {
+	SensorID       string    `json:"sensor_id"`
+	MachineID      string    `json:"machine_id"`
+	MaxEventTime   time.Time `json:"max_event_time"`
+	Watermark      time.Time `json:"watermark"`
+	LastEvaluation time.Time `json:"last_evaluation"`
+	Buffer         []Item    `json:"buffer"`
+}
+
 type Item struct {
 	SensorID  string
 	MachineID string

@@ -2,6 +2,7 @@ package main
 
 import (
 	"analyzer-service/package/analyzer"
+	"analyzer-service/package/storage"
 	"context"
 	"encoding/json"
 	"log"
@@ -13,12 +14,22 @@ import (
 
 	model "analyzer-service/package/config"
 	pkgKafka "analyzer-service/package/kafka"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/segmentio/kafka-go"
 )
 
 // Definizione Mappa[key: SensorID, Value: Channel]
 var sensorMap sync.Map
 
+// Definizione Mappa[key: int (Partizione), Value: Message] --> Serve per la tolleranza ai guasti per conto di Kafka
+var lastMessagePerPartition sync.Map
+
+// Definizione Mappa[key: SensorID, Value: Stato Sensore] --> Mappa temporanea contenente gli stati ripristinati
+var recoveredStates map[string]model.SensorState
+
 func main() {
+	//	-----	1°Passo:	INIZIALIZZAZIONE DELLE CONNESIONI	-----
 	broker := os.Getenv("KAFKA_BROKER")
 	if broker == "" {
 		broker = "kafka:9096"
@@ -32,10 +43,38 @@ func main() {
 		}
 	}()
 
+	//	Inizializzazione Connessione DB Redis
+	parametersRedis := model.RedisParameter{
+		Address:   os.Getenv("REDIS_ADDRESS"),
+		Password:  os.Getenv("REDIS_PASSWORD"),
+		DefaultDB: 0,
+	}
+
+	conn, err := storage.NewRedisWriter(parametersRedis)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func(conn *redis.Client) {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Errore chiusura connessione Redis: %v", err)
+		}
+	}(conn)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	//	Gestione shutdown
+	//	-----	2°Passo:	FASE DI RECOVERY DA REDIS (GESTIONE EVENTUALI GUASTI DURANTE L'ESECUZIONE)	-----
+	var errRecovery error
+	recoveredStates, errRecovery = storage.LoadSnapshot(ctx, conn)
+	if errRecovery != nil {
+		log.Printf("[RECOVERY WARNING] Impossibile caricare snapshot da Redis: %v. Si riparte da zero.", errRecovery)
+		recoveredStates = make(map[string]model.SensorState)
+	} else {
+		log.Printf("[RECOVERY] Ripristinati gli stati per %d sensori da Redis", len(recoveredStates))
+	}
+
+	//	-----	3°Passo:	GESTIONE SHUTDOWN	-----
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -43,6 +82,9 @@ func main() {
 		log.Println("Ricevuto messaggio di arresto, avvio shutdown...")
 		cancel()
 	}()
+
+	//	-----	4°Passo:	AVVIO GOROUTNE PER LA GESTIONE DEL CHECKPOINT DELLE FINESTRE	-----
+	go startCheckpointTicker(ctx, reader, conn)
 
 	log.Println("Analyzer Service attivo sul topic 'data-topic-cleaned'")
 
@@ -57,10 +99,12 @@ func main() {
 			continue
 		}
 
+		//	Salviamo l'ultimo messaggio visto la specifica Partizione del Topic Kafka
+		lastMessagePerPartition.Store(msg.Partition, msg)
+
 		var t model.GenericTelemetry
 		if err := json.Unmarshal(msg.Value, &t); err != nil {
 			log.Printf("Errore unmarshal (messaggio scartato): %v", err)
-			_ = reader.CommitMessages(ctx, msg)
 			continue
 		}
 
@@ -71,39 +115,26 @@ func main() {
 		}
 
 		var item model.Item
+		var valore float64
 
 		if t.TemperatureCelsius != 0 {
-			item = model.Item{
-				SensorID:  t.SensorID,
-				MachineID: t.MachineID,
-				Timestamp: parsedTime,
-				Value:     t.TemperatureCelsius,
-			}
-
+			valore = t.TemperatureCelsius
 		} else if t.PressureBar != 0 {
-			item = model.Item{
-				SensorID:  t.SensorID,
-				MachineID: t.MachineID,
-				Timestamp: parsedTime,
-				Value:     t.PressureBar,
-			}
-
+			valore = t.PressureBar
 		} else {
-			_ = reader.CommitMessages(ctx, msg)
 			continue
+		}
+
+		item = model.Item{
+			SensorID:  t.SensorID,
+			MachineID: t.MachineID,
+			Timestamp: parsedTime,
+			Value:     valore,
 		}
 
 		// Inoltra l'item al worker dedicato del sensore
 		AddNItem(item)
 
-		// Commit del messaggio Kafka dopo l'inoltro
-		_ = reader.CommitMessages(ctx, msg)
-
-		/*
-			TODO:
-				1)	Definire bene come gestire gli eventuali fallimenti
-				2)	Servizio Senza Stato (Demandato al Servizio Decisore)
-		*/
 	}
 }
 
@@ -112,7 +143,56 @@ func AddNItem(item model.Item) {
 	channel := val.(chan model.Item)
 
 	if !loader {
-		go analyzer.SensorWorker(channel)
+		var initialState *model.SensorState
+		if state, ok := recoveredStates[item.SensorID]; ok {
+			initialState = &state
+			delete(recoveredStates, item.SensorID)
+		}
+
+		go analyzer.SensorWorker(item.SensorID, channel, initialState)
 	}
 	channel <- item
+}
+
+func startCheckpointTicker(ctx context.Context, reader *kafka.Reader, conn *redis.Client) {
+	ticker := time.NewTicker(30 * time.Second) //	Snapshot ogni 30 secondi
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			performCheckpoint(context.Background(), reader, conn)
+			return
+
+		case <-ticker.C:
+			performCheckpoint(ctx, reader, conn)
+		}
+	}
+}
+
+func performCheckpoint(ctx context.Context, reader *kafka.Reader, conn *redis.Client) {
+	// 	Cattura lo Snapshot in RAM
+	snapshot := analyzer.CaptureWindowSnapshot()
+
+	// 	Salvataggio su Redis
+	if err := storage.SaveSnapshot(ctx, snapshot, conn); err != nil {
+		log.Printf("[CHECKPOINT ERROR] Fallito salvataggio snapshot su Redis: %v. Annullamento commit Kafka.", err)
+		return // SE REDIS FALLISCE, NON ESEGUO COMMIT SU KAFKA
+	}
+
+	// 	Lettura ultimi messaggi per partizione
+	var messages []kafka.Message
+	lastMessagePerPartition.Range(func(key, value any) bool {
+		messages = append(messages, value.(kafka.Message))
+		return true
+	})
+
+	// 	Commit atomico degli offset su Kafka
+	if len(messages) > 0 {
+		if err := reader.CommitMessages(ctx, messages...); err != nil {
+			log.Printf("[CHECKPOINT ERROR] Errore commit offset su Kafka: %v", err)
+		} else {
+			log.Printf("[CHECKPOINT OK] Snapshot salvato su Redis e offset committati per %d partizioni", len(messages))
+		}
+	}
 }

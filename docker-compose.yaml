@@ -149,9 +149,33 @@ services:
     restart: unless-stopped
     environment:
       - KAFKA_BROKER=kafka:9096
+      - REDIS_ADDRESS=redis:6379
+      - REDIS_PASSWORD=qwertyuiopo1
     depends_on:
       init-kafka:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Database Key-Value (Redis)
+  # ----------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --requirepass qwertyuiopo1
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "qwertyuiopo1", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - ./redis/data:/data
+    restart: always
     networks:
       - sdcc_progetto
 
