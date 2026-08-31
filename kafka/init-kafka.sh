@@ -25,6 +25,11 @@ echo "Creating topic: data-topic-cleaned"
   --bootstrap-server "$BROKER" \
   --partitions 4 --replication-factor 1 --if-not-exists
 
+echo "Creating topic: processed-data-topic"
+/opt/kafka/bin/kafka-topics.sh --create --topic "processed-data-topic" \
+  --bootstrap-server "$BROKER" \
+  --partitions 1 --replication-factor 1 --if-not-exists
+
 # Creazione dei topic dei segnali
 echo "Creating topic: signals-topic"
 /opt/kafka/bin/kafka-topics.sh --create --topic "signals-topic" \

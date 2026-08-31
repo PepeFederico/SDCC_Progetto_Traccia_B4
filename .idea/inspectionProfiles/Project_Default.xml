@@ -10,6 +10,7 @@
       <functions>
         <function importPath="github.com/segmentio/kafka-go" name="NewWriter" />
         <function importPath="github.com/redis/go-redis" name="NewClient" />
+        <function importPath="analyzer-service/package/kafka" name="NewWriterKafka" />
       </functions>
     </inspection_tool>
   </profile>

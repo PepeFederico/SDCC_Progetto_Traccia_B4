@@ -47,3 +47,17 @@ type SlidingWindow struct {
 	StartTime     time.Time
 	EndTime       time.Time
 }
+
+type ProcessedData struct {
+	MessageID    string  `json:"messageId"`
+	SensorID     string  `json:"sensorId"`
+	MachineID    string  `json:"machineId"`
+	Minimo       float64 `json:"minimo"`
+	Media        float64 `json:"media"`
+	Massimo      float64 `json:"massimo"`
+	StdDev       float64 `json:"std-dev"`
+	RateOfChange float64 `json:"rate-of-change"`
+	Timestamp    string  `json:"timestamp"`
+	WindowStart  string  `json:"windowStart"`
+	WindowEnd    string  `json:"windowEnd"`
+}

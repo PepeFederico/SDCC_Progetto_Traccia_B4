@@ -35,6 +35,10 @@ func main() {
 		broker = "kafka:9096"
 	}
 
+	//		DEFINIZIONE TOPIC DEI DATI PROCESSATI
+	topic := "processed-data-topic"
+	processedData := pkgKafka.NewWriterKafka(broker, topic)
+
 	reader := pkgKafka.NewKafkaConsumer(broker)
 	defer func() {
 		err := reader.Close()
@@ -133,12 +137,12 @@ func main() {
 		}
 
 		// Inoltra l'item al worker dedicato del sensore
-		AddNItem(item)
+		AddNItem(item, processedData)
 
 	}
 }
 
-func AddNItem(item model.Item) {
+func AddNItem(item model.Item, writer *kafka.Writer) {
 	val, loader := sensorMap.LoadOrStore(item.SensorID, make(chan model.Item, 500))
 	channel := val.(chan model.Item)
 
@@ -149,7 +153,7 @@ func AddNItem(item model.Item) {
 			delete(recoveredStates, item.SensorID)
 		}
 
-		go analyzer.SensorWorker(item.SensorID, channel, initialState)
+		go analyzer.SensorWorker(item.SensorID, channel, initialState, writer)
 	}
 	channel <- item
 }

@@ -109,7 +109,7 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 
 			} else if whatWeDo < 0.08 {
 				// CASO 2: Picco Fuori Scala (Outlier)
-				outlierTemp := currentMean + (noise * 50)
+				outlierTemp := currentMean + (noise * 5)
 
 				payload = config.TemperatureReading{
 					MessageID:   generateULID(),
@@ -234,7 +234,7 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 
 			} else if whatWeDo < 0.08 {
 				// CASO 2 (5% delle volte, cioè tra 0.03 e 0.08): Picco Fuori Scala (Outlier)
-				outlierTemp := currentMean + (noise * 50) // Moltiplichiamo il rumore per generare un picco
+				outlierTemp := currentMean + (noise * 5) // Moltiplichiamo il rumore per generare un picco
 
 				payload = config.PressureReading{
 					MessageID: generateULID(),

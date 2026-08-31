@@ -3,6 +3,7 @@ module analyzer-service
 go 1.24
 
 require (
+	github.com/oklog/ulid/v2 v2.1.2
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/segmentio/kafka-go v0.4.51
 )
