@@ -164,6 +164,27 @@ services:
       - sdcc_progetto
 
   # ----------------------------
+  # Decision Service (Go)
+  # ----------------------------
+  decision-service:
+    build:
+      context: ./services/decision-service
+      dockerfile: Dockerfile
+    container_name: decision_service
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKER=kafka:9096
+      - REDIS_ADDRESS=redis:6379
+      - REDIS_PASSWORD=qwertyuiopo1
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
   # Database Key-Value (Redis)
   # ----------------------------
   redis:
