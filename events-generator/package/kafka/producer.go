@@ -21,8 +21,8 @@ func NewWriter(broker, topic string) *kafka.Writer {
 
 func SimulationReceiveMessage(kafkaWriter *kafka.Writer, machineID string) {
 	payload := config.EmergencyCommand{
-		MachineID: machineID,
-		Command:   config.ModeStop,
+		SensorID: machineID,
+		Command:  config.ModeStop,
 	}
 
 	jsonBytes, _ := json.Marshal(payload)

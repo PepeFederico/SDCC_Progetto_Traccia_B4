@@ -3,10 +3,10 @@ package config
 import (
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 )
 
-// OperationalMode : Definisce i possibili stati del sensore
 type OperationalMode string
 
 const (
@@ -16,12 +16,6 @@ const (
 	ModeStop   OperationalMode = "ModeStop"
 )
 
-// SensorConfig : Definisce la configurazione iniziale di un sensore
-//
-//	MachineID	: Nome della macchina
-//	BaseMean	: Valore medio
-//	Variance	: Varianza
-//	Interval	: Rate di campionamento
 type SensorConfig struct {
 	SensorID         string        `json:"sensorId"`
 	Type             string        `json:"type"`
@@ -29,9 +23,13 @@ type SensorConfig struct {
 	BaseMean         float64       `json:"baseMean"`
 	Variance         float64       `json:"variance"`
 	Interval         time.Duration `json:"interval"`
+
+	SogliaMinima  float64 `json:"soglia_minima"`
+	SogliaMassima float64 `json:"soglia_massima"`
+	MaxStdDev     float64 `json:"max_stddev"`
+	MaxDrift      float64 `json:"max_drift"`
 }
 
-// StateCommand : Rappresenta un messaggio di controllo/cambio stato
 type StateCommand struct {
 	Mode           OperationalMode `json:"mode"`
 	DriftRate      float64         `json:"driftRate"`
@@ -39,7 +37,6 @@ type StateCommand struct {
 	SensorID       string          `json:"sensorId"`
 }
 
-// TemperatureReading : Rappresenta la lettura telemetrica inviata dal sensore
 type TemperatureReading struct {
 	MessageID   string  `json:"messageId"`
 	SensorID    string  `json:"sensorId"`
@@ -48,7 +45,6 @@ type TemperatureReading struct {
 	Temperature float64 `json:"temperature_celsius"`
 }
 
-// PressureReading : Rappresenta la lettura telemetrica inviata dal sensore
 type PressureReading struct {
 	MessageID string  `json:"messageId"`
 	SensorID  string  `json:"sensorId"`
@@ -58,20 +54,28 @@ type PressureReading struct {
 }
 
 type EmergencyCommand struct {
-	MachineID string          `json:"machineId"`
-	Command   OperationalMode `json:"command"`
+	SensorID string          `json:"sensorId"`
+	Command  OperationalMode `json:"command"`
 }
 
 type DashboardServer struct {
 	TempWriter   *kafka.Writer
 	PressWriter  *kafka.Writer
 	SignalWriter *kafka.Writer
+	ConnRedis    *redis.Client
 }
 
-func NewDashboardServer(temp, press, signal *kafka.Writer) *DashboardServer {
+type RedisParameter struct {
+	Address   string
+	Password  string
+	DefaultDB int
+}
+
+func NewDashboardServer(temp, press, signal *kafka.Writer, conn *redis.Client) *DashboardServer {
 	return &DashboardServer{
 		TempWriter:   temp,
 		PressWriter:  press,
 		SignalWriter: signal,
+		ConnRedis:    conn,
 	}
 }

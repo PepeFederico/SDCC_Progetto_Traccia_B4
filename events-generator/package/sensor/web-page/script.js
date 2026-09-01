@@ -68,7 +68,11 @@ async function createNewSensor(event) {
         machineToControl: document.getElementById('machineToControl').value,
         baseMean: parseFloat(document.getElementById('mean').value),
         variance: parseFloat(document.getElementById('variance').value),
-        interval: rateSeconds * 1000000000 // Nanosecondi per Go time.Duration
+        interval: rateSeconds * 1000000000, // Nanosecondi per Go time.Duration
+        soglia_minima: parseFloat(document.getElementById('soglia-minima').value),
+        soglia_massima: parseFloat(document.getElementById('soglia-massima').value),
+        max_stddev: parseFloat(document.getElementById('std-dev').value),
+        max_drift: parseFloat(document.getElementById('trend').value),
     };
 
     try {

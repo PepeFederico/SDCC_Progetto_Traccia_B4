@@ -17,7 +17,7 @@ import (
 //go:embed web-page/*
 var webAssets embed.FS
 
-func StartDashboardServer(port string, stopChan <-chan struct{}, topics *config.DashboardServer) {
+func StartDashboardServer(ctx context.Context, port string, stopChan <-chan struct{}, parameters *config.DashboardServer) {
 
 	// 1	Endpoint /api/sensors (GET & POST)
 	http.HandleFunc("/api/sensors", func(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +35,10 @@ func StartDashboardServer(port string, stopChan <-chan struct{}, topics *config.
 				BaseMean         float64 `json:"baseMean"`
 				Variance         float64 `json:"variance"`
 				IntervalNs       int64   `json:"interval"`
+				LimitInf         float64 `json:"limitInf"`
+				LimitSup         float64 `json:"limitSup"`
+				StdDev           float64 `json:"stdDev"`
+				Trend            float64 `json:"trend"`
 			}
 
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -49,13 +53,17 @@ func StartDashboardServer(port string, stopChan <-chan struct{}, topics *config.
 				BaseMean:         req.BaseMean,
 				Variance:         req.Variance,
 				Interval:         time.Duration(req.IntervalNs),
+				SogliaMinima:     req.LimitInf,
+				SogliaMassima:    req.LimitSup,
+				MaxStdDev:        req.StdDev,
+				MaxDrift:         req.Trend,
 			}
 
 			switch cfg.Type {
 			case "TemperatureSensor":
-				StartSensor(cfg, stopChan, topics.TempWriter)
+				StartSensor(ctx, cfg, stopChan, parameters.TempWriter, parameters.ConnRedis)
 			case "PressureSensor":
-				StartSensor(cfg, stopChan, topics.PressWriter)
+				StartSensor(ctx, cfg, stopChan, parameters.PressWriter, parameters.ConnRedis)
 			default:
 				http.Error(w, "Tipo sensore non supportato", http.StatusBadRequest)
 				return

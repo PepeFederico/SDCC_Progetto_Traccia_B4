@@ -61,6 +61,22 @@
                     <label for="rate">Rate di campionamento (in secondi)</label>
                     <input id="rate" name="rate" type="number" step="1" value="1" placeholder="Frequenza in secondi" required>
                 </li>
+                <li>
+                    <label for="soglia-minima">Soglia Minima (Dipendente dal tipo di Sensore)</label>
+                    <input id="soglia-minima" name="soglia-minima" type="number" step="1" value="1" placeholder="Definizione soglia minima" required>
+                </li>
+                <li>
+                    <label for="soglia-massima">Soglia Massima (Dipendente dal tipo di Sensore)</label>
+                    <input id="soglia-massima" name="soglia-massima" type="number" step="1" value="1" placeholder="Definizione soglia massima" required>
+                </li>
+                <li>
+                    <label for="std-dev">Soglia Instabilità (Definizione std-dev)</label>
+                    <input id="std-dev" name="std-dev" type="number" step="1" value="1" placeholder="Definizione deviazione standard" required>
+                </li>
+                <li>
+                    <label for="trend">Soglia di Deriva (Trend ammesso)</label>
+                    <input id="trend" name="trend" type="number" step="0.001" value="0.00" placeholder="Definizione soglia trend" required>
+                </li>
             </ol>
 
             <div class="btn-group-insert">

@@ -65,9 +65,13 @@ services:
       - "8081:8081" # Espone la Dashboard HTTP
     environment:
       - KAFKA_BROKER=kafka:9096 # Usa la porta interna di Kafka
+      - REDIS_ADDRESS=redis:6379
+      - REDIS_PASSWORD=qwertyuiopo1
     depends_on:
       init-kafka:
         condition: service_completed_successfully # Attende la creazione dei Topic
+      redis:
+        condition: service_healthy
     networks:
       - sdcc_progetto
 

@@ -1,19 +1,35 @@
 package sensor
 
 import (
+	"context"
 	"log"
 	"sync"
+	"time"
 
 	"progettoSDCC/events-generator/package/config"
+	"progettoSDCC/events-generator/package/storage"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 )
 
 var machineRegistry sync.Map
 
-func StartSensor(cfg config.SensorConfig, stopChan <-chan struct{}, kafkaWriter *kafka.Writer) chan config.StateCommand {
+func StartSensor(ctx context.Context, cfg config.SensorConfig, stopChan <-chan struct{}, kafkaWriter *kafka.Writer, conn *redis.Client) chan config.StateCommand {
 	modeChannel := make(chan config.StateCommand, 10)
 	machineRegistry.Store(cfg.SensorID, modeChannel)
+
+	//	Salvataggio limiti operativi sul DB Redis, tentativo di Invio con Retry
+	maxRetries := 5
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if storage.SaveParameter(ctx, cfg, conn) == nil {
+			break
+		}
+
+		log.Printf("[WARNING]: Tentativo %d/%d fallito per sensore %s. Retry in corso", attempt, maxRetries, cfg.SensorID)
+		time.Sleep(time.Duration(attempt*100) * time.Millisecond)
+	}
 
 	switch cfg.Type {
 	case "TemperatureSensor":
