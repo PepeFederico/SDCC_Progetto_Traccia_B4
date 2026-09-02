@@ -108,7 +108,7 @@ services:
       - DOCKER_INFLUXDB_INIT_USERNAME=admin
       - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword123
       - DOCKER_INFLUXDB_INIT_ORG=sdcc_org
-      - DOCKER_INFLUXDB_INIT_BUCKET=telemetry
+      - DOCKER_INFLUXDB_INIT_BUCKET=default
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8086/health" ]
@@ -116,6 +116,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Setup Kafka (Creazione Topic)
+  # ----------------------------
+  init-influxdb:
+    image: influxdb:2.7
+    container_name: init_influxdb
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      influx bucket create -n telemetry -o sdcc_org -t my-super-secret-token --host http://influxdb:8086 || true;
+      influx bucket create -n measurement -o sdcc_org -t my-super-secret-token --host http://influxdb:8086 || true;
+      echo 'Bucket telemetry e measurement verificati/creati con successo!';
+      "
     networks:
       - sdcc_progetto
 
@@ -137,8 +155,8 @@ services:
     depends_on:
       init-kafka:
         condition: service_completed_successfully
-      influxdb:
-        condition: service_healthy
+      init-influxdb:
+        condition: service_completed_successfully
     networks:
       - sdcc_progetto
 
@@ -181,6 +199,29 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    networks:
+      - sdcc_progetto
+
+  # ----------------------------
+  # Sink Service (Go)
+  # ----------------------------
+  sink-service:
+    build:
+      context: ./services/sink-service
+      dockerfile: Dockerfile
+    container_name: sink_service
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKER=kafka:9096
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=my-super-secret-token
+      - INFLUXDB_ORGANIZATION=sdcc_org
+      - INFLUXDB_BUCKET=measurement
+    depends_on:
+      init-kafka:
+        condition: service_completed_successfully
+      init-influxdb:
+        condition: service_completed_successfully
     networks:
       - sdcc_progetto
 
