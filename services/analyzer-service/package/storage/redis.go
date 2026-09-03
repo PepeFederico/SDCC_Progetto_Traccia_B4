@@ -97,3 +97,17 @@ func LoadSnapshot(ctx context.Context, conn *redis.Client) (map[string]config.Se
 
 	return snapshot, nil
 }
+
+func LoadTimestamp(ctx context.Context, sensorID string, conn *redis.Client) (time.Time, error) {
+	val, err := conn.Get(ctx, fmt.Sprintf("sensor:stopped_at:%s", sensorID)).Result()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	timeStamp, err := time.Parse(time.RFC3339, val)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("errore parsing timestamp RFC3339: %w", err)
+	}
+
+	return timeStamp, nil
+}

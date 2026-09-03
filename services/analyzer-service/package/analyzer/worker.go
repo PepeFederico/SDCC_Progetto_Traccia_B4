@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	model "analyzer-service/package/config"
+	"analyzer-service/package/storage"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,27 +12,33 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 )
 
 // WorkerInstance : Gestisce lo stato per ogni sensore correntemente attivo
 type WorkerInstance struct {
-	mu          sync.RWMutex
-	inputStream <-chan model.Item
-	state       model.SensorState
+	mu                 sync.RWMutex
+	inputStream        <-chan model.Item
+	invalidDataChannel <-chan string
+	state              model.SensorState
+	writer             *kafka.Writer
+	isStopped          bool
 }
 
 // Mappa thread-safe dei worker correntemente attivi
 var activeWorkers sync.Map
-var producer *kafka.Writer
 
 func generateULID() string {
 	return ulid.Make().String()
 }
 
-func SensorWorker(sensorID string, inputStream <-chan model.Item, restoredState *model.SensorState, writer *kafka.Writer) {
+func SensorWorker(ctx context.Context, sensorID string, channels *model.SensorChannels, restoredState *model.SensorState, writer *kafka.Writer, redisConn *redis.Client, checkpoint func()) {
 	w := &WorkerInstance{
-		inputStream: inputStream,
+		inputStream:        channels.InputChannel,
+		invalidDataChannel: channels.InvalidDataChannel,
+		writer:             writer,
+		isStopped:          false,
 		state: model.SensorState{
 			SensorID: sensorID,
 			Buffer:   make([]model.Item, 0),
@@ -45,87 +52,169 @@ func SensorWorker(sensorID string, inputStream <-chan model.Item, restoredState 
 	}
 
 	activeWorkers.Store(sensorID, w)
-	//		Settiamo il Producer per ogni goroutine
-	producer = writer
-
-	go w.run()
+	go w.run(ctx, redisConn, checkpoint)
 }
 
-func (w *WorkerInstance) run() {
+func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, checkpoint func()) {
 
 	windowDuration := 2 * time.Minute
-	slideInterval := 1 * time.Minute  //+ 30*time.Second
+	slideInterval := 1 * time.Minute
 	watermarkDelay := 1 * time.Minute // Tolleranza ritardi di 1 minuto
 
-	for item := range w.inputStream {
-		eventTime := item.Timestamp.UTC()
+	defer activeWorkers.Delete(w.state.SensorID)
 
-		//	-----	Starting Sezione Critica	-----
-		w.mu.Lock()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case item, ok := <-w.inputStream:
+			if !ok {
+				return
+			}
 
-		w.state.MachineID = item.MachineID
+			//	-----	Starting Sezione Critica	-----
+			w.mu.Lock()
 
-		//	Aggiornamento MaxEventTime e Watermark
-		if eventTime.After(w.state.MaxEventTime) {
-			w.state.MaxEventTime = eventTime
-			w.state.Watermark = w.state.MaxEventTime.Add(-watermarkDelay)
-		}
+			if w.isStopped {
+				w.mu.Unlock()
+				continue
+			}
 
-		//	Controllo elementi in ritardo rispetto alla finestra
-		if !w.state.Watermark.IsZero() && eventTime.Before(w.state.Watermark) {
-			log.Printf("[LATE DATA SCARTATO] Sensore %s: eventTime=%s < watermark=%s",
-				item.SensorID, eventTime.Format(time.RFC3339), w.state.Watermark.Format(time.RFC3339))
+			eventTime := item.Timestamp.UTC()
+			w.state.MachineID = item.MachineID
+
+			//	Aggiornamento MaxEventTime e Watermark
+			if eventTime.After(w.state.MaxEventTime) {
+				w.state.MaxEventTime = eventTime
+				w.state.Watermark = w.state.MaxEventTime.Add(-watermarkDelay)
+			}
+
+			//	Controllo elementi in ritardo rispetto alla finestra
+			if !w.state.Watermark.IsZero() && eventTime.Before(w.state.Watermark) {
+				log.Printf("[LATE DATA SCARTATO] Sensore %s: eventTime=%s < watermark=%s",
+					item.SensorID, eventTime.Format(time.RFC3339), w.state.Watermark.Format(time.RFC3339))
+				w.mu.Unlock()
+				continue //	Nuova iterazione del ciclo for
+			}
+
+			w.state.Buffer = append(w.state.Buffer, item)
+			//	Pulizia elementi fuori finestra
+			windowEnd := w.state.MaxEventTime
+			windowStart := windowEnd.Add(-windowDuration)
+
+			indexValid := -1
+			for i, el := range w.state.Buffer {
+				if el.Timestamp.After(windowStart) || el.Timestamp.Equal(windowStart) {
+					indexValid = i
+					break
+				}
+			}
+
+			if indexValid > 0 {
+				w.state.Buffer = w.state.Buffer[indexValid:]
+			} else if indexValid == -1 {
+				// Tutti gli elementi nel buffer sono antecedenti a windowStart
+				w.state.Buffer = w.state.Buffer[:0]
+			}
+
+			//	Verifico la chiusura della finestra
+			var windowToProcess *model.SlidingWindow
+			var currentWatermark time.Time
+
+			if w.state.LastEvaluation.IsZero() || w.state.MaxEventTime.Sub(w.state.LastEvaluation) >= slideInterval {
+				itemToProcess := make([]model.Item, len(w.state.Buffer))
+				copy(itemToProcess, w.state.Buffer)
+
+				windowToProcess = &model.SlidingWindow{
+					Dimension:     windowDuration,
+					SlideInterval: slideInterval,
+					ListItems:     itemToProcess,
+					StartTime:     windowStart,
+					EndTime:       windowEnd,
+				}
+				currentWatermark = w.state.Watermark
+				w.state.LastEvaluation = w.state.MaxEventTime
+			}
+
 			w.mu.Unlock()
-			continue //	Nuova iterazione del ciclo for
-		}
 
-		w.state.Buffer = append(w.state.Buffer, item)
-		//	Pulizia elementi fuori finestra
-		windowEnd := w.state.MaxEventTime
-		windowStart := windowEnd.Add(-windowDuration)
+			// Processamento della finestra --> Calcolo delle metriche
+			if windowToProcess != nil {
+				processWindow(w.writer, w.state.SensorID, w.state.MachineID, *windowToProcess, currentWatermark)
+			}
 
-		indexValid := 0
-		for i, el := range w.state.Buffer {
-			if el.Timestamp.After(windowStart) || el.Timestamp.Equal(windowStart) {
-				indexValid = i
-				break
+		case state := <-w.invalidDataChannel:
+			switch state {
+			case "STOPPED":
+				w.handlerInvalidData(ctx, redisConn, checkpoint)
+			case "WARM-UP":
+				w.handlerWarmUpState(checkpoint)
+			case "READY":
+				w.mu.Lock()
+				w.isStopped = false
+				w.mu.Unlock()
 			}
 		}
-
-		w.state.Buffer = w.state.Buffer[indexValid:]
-
-		//	Verifico la chiusura della finestra
-		var windowToProcess *model.SlidingWindow
-		var currentWatermark time.Time
-
-		if w.state.LastEvaluation.IsZero() || w.state.MaxEventTime.Sub(w.state.LastEvaluation) >= slideInterval {
-			itemToProcess := make([]model.Item, len(w.state.Buffer))
-			copy(itemToProcess, w.state.Buffer)
-
-			windowToProcess = &model.SlidingWindow{
-				Dimension:     windowDuration,
-				SlideInterval: slideInterval,
-				ListItems:     itemToProcess,
-				StartTime:     windowStart,
-				EndTime:       windowEnd,
-			}
-			currentWatermark = w.state.Watermark
-			w.state.LastEvaluation = w.state.MaxEventTime
-		}
-
-		w.mu.Unlock()
-
-		// Processamento della finestra --> Calcolo delle metriche
-		if windowToProcess != nil {
-			processWindow(w.state.SensorID, w.state.MachineID, *windowToProcess, currentWatermark)
-		}
-
 	}
 
-	activeWorkers.Delete(w.state.SensorID)
 }
 
-func processWindow(sensorID, machineID string, w model.SlidingWindow, currentWatermark time.Time) {
+func (w *WorkerInstance) handlerInvalidData(ctx context.Context, conn *redis.Client, checkpoint func()) {
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	stopTime, err := storage.LoadTimestamp(reqCtx, w.state.SensorID, conn)
+
+	w.mu.Lock()
+	w.isStopped = true
+
+	if err != nil {
+		log.Printf("[%s] Errore caricamento stop timestamp: %v. Svuotamento buffer.", w.state.SensorID, err)
+		w.state.Buffer = w.state.Buffer[:0]
+		w.mu.Unlock()
+		return
+	}
+
+	validBuffer := make([]model.Item, 0, len(w.state.Buffer))
+	for _, item := range w.state.Buffer {
+		// Manteniamo solo gli elementi arrivati prima dello STOP
+		if item.Timestamp.Before(stopTime) || item.Timestamp.Equal(stopTime) {
+			validBuffer = append(validBuffer, item)
+		}
+	}
+
+	scartati := len(w.state.Buffer) - len(validBuffer)
+	w.state.Buffer = validBuffer
+	w.mu.Unlock()
+
+	log.Printf("[%s] Invalidazione eseguita: scartati %d elementi ricevuti dopo lo STOP (%v)",
+		w.state.SensorID, scartati, stopTime.Format(time.RFC3339))
+
+	if checkpoint != nil {
+		checkpoint()
+	}
+}
+
+func (w *WorkerInstance) handlerWarmUpState(checkpoint func()) {
+	w.mu.Lock()
+	elementiRimasti := len(w.state.Buffer)
+
+	// Svuotamento buffer e reset completo dello stato temporale per la nuova sessione
+	w.state.Buffer = w.state.Buffer[:0]
+	w.state.LastEvaluation = time.Time{}
+	w.state.MaxEventTime = time.Time{}
+	w.state.Watermark = time.Time{}
+	w.mu.Unlock()
+
+	log.Printf("[%s] WARM-UP avviato: svuotati %d elementi residui della precedente sessione",
+		w.state.SensorID, elementiRimasti)
+
+	if checkpoint != nil {
+		checkpoint()
+	}
+}
+
+func processWindow(writer *kafka.Writer, sensorID, machineID string, w model.SlidingWindow, currentWatermark time.Time) {
 	if len(w.ListItems) == 0 {
 		return
 	}
@@ -196,7 +285,7 @@ func processWindow(sensorID, machineID string, w model.SlidingWindow, currentWat
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	err = producer.WriteMessages(ctx, kafka.Message{
+	err = writer.WriteMessages(ctx, kafka.Message{
 		Value: jsonBytes,
 	})
 	cancel()

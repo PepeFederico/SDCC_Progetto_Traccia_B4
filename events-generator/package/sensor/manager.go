@@ -2,6 +2,7 @@ package sensor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -31,11 +32,23 @@ func StartSensor(ctx context.Context, cfg config.SensorConfig, stopChan <-chan s
 		time.Sleep(time.Duration(attempt*100) * time.Millisecond)
 	}
 
+	//	Gestione dello stato dei Sensori (All'avvio Stato : Ready)
+	err := conn.Set(ctx, fmt.Sprintf("sensor:state:%s", cfg.SensorID), "READY", 0).Err()
+	if err != nil {
+		log.Printf("[%s] Errore salvataggio dello stato su Redis : %v", cfg.SensorID, err)
+	}
+
+	//	Pubblicazione per aggiornare la cache locale degli altri servizi sfruttando Pub/Sub Redis
+	eventPayload := fmt.Sprintf("%s:%s", cfg.SensorID, "READY")
+	conn.Publish(ctx, "sensor:state-events", eventPayload)
+
+	log.Printf("[%s] Sensore registrato con stato: %s", cfg.SensorID, eventPayload)
+
 	switch cfg.Type {
 	case "TemperatureSensor":
-		go temperatureSensorWorker(cfg, stopChan, modeChannel, kafkaWriter)
+		go temperatureSensorWorker(ctx, cfg, stopChan, modeChannel, kafkaWriter, conn)
 	case "PressureSensor":
-		go pressureSensorWorker(cfg, stopChan, modeChannel, kafkaWriter)
+		go pressureSensorWorker(ctx, cfg, stopChan, modeChannel, kafkaWriter, conn)
 	}
 
 	return modeChannel

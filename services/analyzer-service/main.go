@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,6 +28,16 @@ var lastMessagePerPartition sync.Map
 
 // Definizione Mappa[key: SensorID, Value: Stato Sensore] --> Mappa temporanea contenente gli stati ripristinati
 var recoveredStates map[string]model.SensorState
+
+var CheckpointTriggerChan = make(chan struct{}, 1)
+
+func RequestCheckpoint() {
+	select {
+	case CheckpointTriggerChan <- struct{}{}:
+	default:
+		// Se c'è già una richiesta in coda, non serve accumularne altre
+	}
+}
 
 func main() {
 	//	-----	1°Passo:	INIZIALIZZAZIONE DELLE CONNESIONI	-----
@@ -92,6 +103,9 @@ func main() {
 
 	log.Println("Analyzer Service attivo sul topic 'data-topic-cleaned'")
 
+	//	-----	5°Passo:	AVVIO GOROUTINE PER LA GESTIONE DEI SEGNALI DA REDIS PUB/SUB. GESTIONE STATO STOPPED DEI SENSORI	-----
+	go performStoppedStateSensor(ctx, conn)
+
 	for {
 		// Usiamo FetchMessage per gestire manualmente il commit
 		msg, err := reader.FetchMessage(ctx)
@@ -137,14 +151,20 @@ func main() {
 		}
 
 		// Inoltra l'item al worker dedicato del sensore
-		AddNItem(item, processedData)
+		AddNItem(ctx, item, processedData, conn)
 
 	}
 }
 
-func AddNItem(item model.Item, writer *kafka.Writer) {
-	val, loader := sensorMap.LoadOrStore(item.SensorID, make(chan model.Item, 500))
-	channel := val.(chan model.Item)
+func AddNItem(ctx context.Context, item model.Item, writer *kafka.Writer, conn *redis.Client) {
+	//	Definizione dei Canali
+	channels := &model.SensorChannels{
+		InputChannel:       make(chan model.Item, 500),
+		InvalidDataChannel: make(chan string, 100),
+	}
+
+	val, loader := sensorMap.LoadOrStore(item.SensorID, channels)
+	channel := val.(*model.SensorChannels)
 
 	if !loader {
 		var initialState *model.SensorState
@@ -153,9 +173,9 @@ func AddNItem(item model.Item, writer *kafka.Writer) {
 			delete(recoveredStates, item.SensorID)
 		}
 
-		go analyzer.SensorWorker(item.SensorID, channel, initialState, writer)
+		go analyzer.SensorWorker(ctx, item.SensorID, channel, initialState, writer, conn, RequestCheckpoint)
 	}
-	channel <- item
+	channel.InputChannel <- item
 }
 
 func startCheckpointTicker(ctx context.Context, reader *kafka.Reader, conn *redis.Client) {
@@ -165,11 +185,20 @@ func startCheckpointTicker(ctx context.Context, reader *kafka.Reader, conn *redi
 	for {
 		select {
 		case <-ctx.Done():
-			performCheckpoint(context.Background(), reader, conn)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			performCheckpoint(shutdownCtx, reader, conn)
+			cancel()
 			return
 
 		case <-ticker.C:
-			performCheckpoint(ctx, reader, conn)
+			chkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			performCheckpoint(chkCtx, reader, conn)
+			cancel()
+
+		case <-CheckpointTriggerChan: // <-- Checkpoint su richiesta di invalidazione
+			chkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			performCheckpoint(chkCtx, reader, conn)
+			cancel()
 		}
 	}
 }
@@ -197,6 +226,47 @@ func performCheckpoint(ctx context.Context, reader *kafka.Reader, conn *redis.Cl
 			log.Printf("[CHECKPOINT ERROR] Errore commit offset su Kafka: %v", err)
 		} else {
 			log.Printf("[CHECKPOINT OK] Snapshot salvato su Redis e offset committati per %d partizioni", len(messages))
+		}
+	}
+}
+
+func performStoppedStateSensor(ctx context.Context, conn *redis.Client) {
+	//	Sottoscrizione al topic Redis sensor:state-events
+	pubSub := conn.Subscribe(ctx, `sensor:state-events`)
+	defer func(pubSub *redis.PubSub) {
+		err := pubSub.Close()
+		if err != nil {
+			log.Printf("Errore chiusura connessione Redis: %v", err)
+		}
+	}(pubSub)
+
+	ch := pubSub.Channel()
+	log.Printf("[DISPATCHER] In Ascolto sul topic Redis...")
+
+	for msg := range ch {
+		processEvent(msg.Payload)
+	}
+}
+
+func processEvent(msg string) {
+	parts := strings.Split(msg, ":")
+	if len(parts) != 2 {
+		return
+	}
+
+	sensorID := parts[0]
+	state := parts[1]
+
+	//	Troviamo il canale associato al sensore
+	if val, ok := sensorMap.Load(sensorID); ok {
+		channels := val.(*model.SensorChannels)
+
+		//	Invio del Messaggio
+		select {
+		case channels.InvalidDataChannel <- state:
+			log.Printf("[DISPATCHER] Notificato stato '%s' al worker %s", state, sensorID)
+		default:
+			log.Printf("[WARNING] Canale invalidazione pieno per %s, messaggio scartato", sensorID)
 		}
 	}
 }

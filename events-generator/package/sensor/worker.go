@@ -12,6 +12,7 @@ import (
 	"progettoSDCC/events-generator/package/config"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -22,7 +23,7 @@ func randomRange(min, max int) int {
 	return min + rand.IntN(max-min+1)
 }
 
-func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, modeChan <-chan config.StateCommand, kafkaWriter *kafka.Writer) {
+func temperatureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan <-chan struct{}, modeChan <-chan config.StateCommand, kafkaWriter *kafka.Writer, conn *redis.Client) {
 	defer machineRegistry.Delete(cfg.SensorID)
 
 	ticker := time.NewTicker(cfg.Interval)
@@ -37,6 +38,8 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 
 	fmt.Printf("[Macchina: %s -- Sensore: %s] Avvio monitoraggio (Media: %.2f°C)\n", cfg.MachineToControl, cfg.SensorID, cfg.BaseMean)
 
+	updateSensorState := updateState(ctx, cfg, conn)
+
 	for {
 		select {
 		case <-stopChan:
@@ -50,20 +53,10 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
-				log.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
-
-				// Simulazione riparazione senza bloccare lo stopChan
-				timeout := time.Duration(randomRange(30, 120)) * time.Second
-				select {
-				case <-stopChan:
-					log.Printf("[%s] Arresto sensore durante la riparazione.\n", cfg.SensorID)
+				var done bool
+				currentMode, currentMean, driftRate, done = processModeStopState(ctx, cfg, stopChan, updateSensorState, conn)
+				if done {
 					return
-				case <-time.After(timeout):
-					// Ripristino corretto funzionamento al termine della riparazione
-					currentMode = config.ModeNormal
-					currentMean = cfg.BaseMean
-					driftRate = 0.0
-					log.Printf("[%s] Ripristino corretto funzionamento!.\n", cfg.SensorID)
 				}
 
 			case config.ModeDrift:
@@ -136,8 +129,8 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 				continue
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
 			cancel()
 
 			if err != nil {
@@ -149,7 +142,7 @@ func temperatureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, 
 	}
 }
 
-func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, modeChan <-chan config.StateCommand, kafkaWriter *kafka.Writer) {
+func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan <-chan struct{}, modeChan <-chan config.StateCommand, kafkaWriter *kafka.Writer, conn *redis.Client) {
 	defer machineRegistry.Delete(cfg.SensorID)
 
 	ticker := time.NewTicker(cfg.Interval)
@@ -164,6 +157,8 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 
 	fmt.Printf("[Macchina: %s -- Sensore: %s] Avvio monitoraggio (Media: %.2fBar)\n", cfg.MachineToControl, cfg.SensorID, cfg.BaseMean)
 
+	updateSensorState := updateState(ctx, cfg, conn)
+
 	for {
 		select {
 		case <-stopChan:
@@ -173,29 +168,20 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 		case cmd := <-modeChan:
 			log.Printf("[Macchina: %s -- Sensore: %s] Ricevuto comando: %s (Spike: %.2f, Drift: %.2f)\n",
 				cfg.MachineToControl, cfg.SensorID, cmd.Mode, cmd.SpikeMagnitude, cmd.DriftRate)
+
 			currentMode = cmd.Mode
 			switch cmd.Mode {
 			case config.ModeStop:
-				log.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
-
-				// Simulazione riparazione senza bloccare lo stopChan
-				timeout := time.Duration(randomRange(30, 120)) * time.Second
-				select {
-				case <-stopChan:
-					log.Printf("[%s] Arresto sensore durante la riparazione.\n", cfg.SensorID)
+				var done bool
+				currentMode, currentMean, driftRate, done = processModeStopState(ctx, cfg, stopChan, updateSensorState, conn)
+				if done {
 					return
-				case <-time.After(timeout):
-					// Ripristino corretto funzionamento al termine della riparazione
-					currentMode = config.ModeNormal
-					currentMean = cfg.BaseMean
-					driftRate = 0.0
-					log.Printf("[%s] Ripristino corretto funzionamento!.\n", cfg.SensorID)
 				}
 			case config.ModeDrift:
 				driftRate = cmd.DriftRate
 			case config.ModeSpike:
 				spikeValue = cmd.SpikeMagnitude
-			default:
+			case config.ModeNormal:
 				currentMean = cfg.BaseMean
 				driftRate = 0.0
 				spikeValue = 0.0
@@ -234,14 +220,14 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 
 			} else if whatWeDo < 0.08 {
 				// CASO 2 (5% delle volte, cioè tra 0.03 e 0.08): Picco Fuori Scala (Outlier)
-				outlierTemp := currentMean + (noise * 5) // Moltiplichiamo il rumore per generare un picco
+				outlierPressure := currentMean + (noise * 5) // Moltiplichiamo il rumore per generare un picco
 
 				payload = config.PressureReading{
 					MessageID: generateULID(),
 					SensorID:  cfg.SensorID,
 					MachineID: cfg.MachineToControl,
 					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Pressure:  math.Round(outlierTemp*100) / 100,
+					Pressure:  math.Round(outlierPressure*100) / 100,
 				}
 
 			} else {
@@ -261,8 +247,8 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 				continue
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err = kafkaWriter.WriteMessages(ctx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
 			cancel()
 
 			if err != nil {
@@ -272,4 +258,54 @@ func pressureSensorWorker(cfg config.SensorConfig, stopChan <-chan struct{}, mod
 			}
 		}
 	}
+}
+
+func processModeStopState(ctx context.Context, cfg config.SensorConfig, stopChan <-chan struct{}, updateSensorState func(state string), conn *redis.Client) (config.OperationalMode, float64, float64, bool) {
+	//	Ricevuto comando di STOP sul sensore SensorID
+	log.Printf("[Macchina: %s -- Sensore: %s] Emergenza! Arresto preventivo.\n", cfg.MachineToControl, cfg.SensorID)
+
+	//	Eseguo il cambio di stato del Sensore: Ready --> Stopped
+	updateSensorState("STOPPED")
+	//	Registro il momento in cui è stato Stoppato il sensore
+	_ = conn.Set(ctx, fmt.Sprintf("sensor:stopped_at:%s", cfg.SensorID), time.Now().UTC().Format(time.RFC3339), 0).Err()
+
+	// Simulazione riparazione senza bloccare lo stopChan
+	timeout := time.Duration(randomRange(30, 120)) * time.Second
+	select {
+	case <-stopChan:
+		log.Printf("[%s] Arresto sensore durante la riparazione.\n", cfg.SensorID)
+		return "", 0, 0, true
+	case <-time.After(timeout):
+		// Ripristino corretto funzionamento al termine della riparazione
+		log.Printf("[%s] Ripristino corretto funzionamento!. Avvio fase di WARM-UP. \n", cfg.SensorID)
+	}
+
+	//	Aggiornamento Stato
+	updateSensorState("WARM-UP")
+	warmupTimeout := 10 * time.Second
+
+	select {
+	case <-stopChan:
+		log.Printf("[%s] Arresto sensore durante la fase di WARM-UP.\n", cfg.SensorID)
+		return "", 0, 0, true
+	case <-time.After(warmupTimeout):
+		//	Aggiornamento Stato
+		updateSensorState("READY")
+		log.Printf("[%s] Ripristino corretto funzionamento!.\n", cfg.SensorID)
+	}
+	return config.ModeNormal, cfg.BaseMean, 0.0, false
+}
+
+func updateState(ctx context.Context, cfg config.SensorConfig, conn *redis.Client) func(state string) {
+	updateSensorState := func(state string) {
+		err := conn.Set(ctx, fmt.Sprintf("sensor:state:%s", cfg.SensorID), state, 0).Err()
+		if err != nil {
+			log.Printf("[%s] Errore salvataggio stato %s su Redis: %v", cfg.SensorID, state, err)
+		}
+
+		eventPayload := fmt.Sprintf("%s:%s", cfg.SensorID, state)
+		conn.Publish(ctx, "sensor:state-events", eventPayload)
+		log.Printf("[%s] Stato aggiornato: %s", cfg.SensorID, state)
+	}
+	return updateSensorState
 }

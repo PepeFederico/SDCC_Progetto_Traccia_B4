@@ -61,3 +61,8 @@ type ProcessedData struct {
 	WindowStart  string  `json:"windowStart"`
 	WindowEnd    string  `json:"windowEnd"`
 }
+
+type SensorChannels struct {
+	InputChannel       chan Item
+	InvalidDataChannel chan string
+}
