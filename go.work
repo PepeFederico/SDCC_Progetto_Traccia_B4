@@ -1,0 +1,11 @@
+go 1.25.0
+
+use (
+	.
+	./front-end
+	services/decision-service
+	services/analyzer-service
+	services/ingestion-service
+	services/sink-service
+	services/write-service
+)

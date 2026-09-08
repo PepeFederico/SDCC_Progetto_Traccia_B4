@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package generator;
+option go_package = "progettoSDCC/proto/event-generator;generatorpb";
+
+service EventGenerator {
+  rpc InsertNewSensor(Sensor) returns (Response);
+  rpc ChangeMode(Mode) returns (Response);
+  rpc LoadSensorType(LoadSensorTypeRequest) returns (SensorType);
+  rpc RetriveActiveSensor(GetActiveSensorRequest) returns (ActiveSensor);
+}
+
+message Sensor {
+  string sensor_id            = 1;
+  string type                 = 2;
+  string machine_to_control   = 3;
+  float base_mean             = 4;
+  float variance              = 5;
+  int64 interval_nano         = 6;
+  float soglia_minima         = 7;
+  float soglia_massima        = 8;
+  float max_std_dev           = 9;
+  float max_drift             = 10;
+}
+
+message Mode {
+  string sensor_id  = 1;
+  float value       = 2;
+  string mode       = 3;
+}
+
+message Response {
+  bool done       = 1;
+  string message  = 2; // ritorno eventuali messaggi di errore/successo
+}
+
+message SensorType{
+  repeated string type     = 1;
+}
+
+message ActiveSensor{
+  repeated string sensor  = 1;
+}
+
+// Messaggio di richiesta senza campi
+message LoadSensorTypeRequest {}
+
+// Messaggio di richiesta senza campi
+message GetActiveSensorRequest {}

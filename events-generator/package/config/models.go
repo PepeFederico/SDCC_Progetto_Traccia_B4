@@ -70,12 +70,3 @@ type RedisParameter struct {
 	Password  string
 	DefaultDB int
 }
-
-func NewDashboardServer(temp, press, signal *kafka.Writer, conn *redis.Client) *DashboardServer {
-	return &DashboardServer{
-		TempWriter:   temp,
-		PressWriter:  press,
-		SignalWriter: signal,
-		ConnRedis:    conn,
-	}
-}

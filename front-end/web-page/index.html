@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>IoT System Control & Monitoring</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- Menu a Schede Centralizzato -->
+<nav class="navbar">
+    <button class="tab-btn active" onclick="openTab('generator')">Simulatore & Anomalie</button>
+    <button class="tab-btn" onclick="openTab('monitoring')">Monitoraggio & Controllo</button>
+</nav>
+
+<!-- SCHEDA 1: La tua pagina attuale del generatore -->
+<div id="tab-generator" class="tab-content active">
+
+    <!-- SEZIONE 1: CREAZIONE SENSORE -->
+    <div class="card">
+        <h2>Inserimento Nuovo Sensore</h2>
+
+        <form id="InsertNewSensor">
+            <fieldset class="form-fieldset">
+
+                <!-- Sotto-sezione: Dati Generali -->
+                <span class="section-title">Informazioni Generali</span>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="sensorId">Identificativo Sensore</label>
+                        <input id="sensorId" name="sensorId" type="text" placeholder="Es. SENS-101" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newSensorSelect">Tipo di Sensore</label>
+                        <select id="newSensorSelect" name="type" required>
+                            <option value="">Caricamento tipi...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="machineToControl">Macchina da Controllare</label>
+                        <input id="machineToControl" name="machineToControl" type="text" placeholder="Es. Pressa-01" required>
+                    </div>
+                </div>
+
+                <!-- Sotto-sezione: Configurazione Matematica -->
+                <span class="section-title">Parametri di Generazione</span>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="baseMean">Media Operativa</label>
+                        <input id="baseMean" name="baseMean" type="number" step="0.1" placeholder="Valore medio" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="variance">Varianza</label>
+                        <input id="variance" name="variance" type="number" step="0.01" placeholder="Varianza" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="interval">Rate Campionamento (sec)</label>
+                        <input id="interval" name="interval" type="number" step="1" value="1" min="1" required>
+                    </div>
+                </div>
+
+                <!-- Sotto-sezione: Soglie e Allarmi -->
+                <span class="section-title">Soglie di Controllo & Anomalia</span>
+                <div class="form-grid cols-4">
+                    <div class="form-group">
+                        <label for="soglia_minima">Soglia Minima</label>
+                        <input id="soglia_minima" name="soglia_minima" type="number" step="0.1" value="0.0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="soglia_massima">Soglia Massima</label>
+                        <input id="soglia_massima" name="soglia_massima" type="number" step="0.1" value="100.0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="max_std_dev">Instabilità (std-dev)</label>
+                        <input id="max_std_dev" name="max_std_dev" type="number" step="0.001" value="1.0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="max_drift">Deriva (Trend)</label>
+                        <input id="max_drift" name="max_drift" type="number" step="0.001" value="0.05" required>
+                    </div>
+                </div>
+
+                <div class="btn-group-insert">
+                    <button type="submit" class="btn btn-success">Crea Sensore</button>
+                    <button type="reset" class="btn btn-danger" onclick="resetInsertLog()">Reset Form</button>
+                </div>
+            </fieldset>
+        </form>
+
+        <div id="logInsert" class="log-box">Stato: In attesa di inserimento nuovo sensore...</div>
+    </div>
+
+    <!-- SEZIONE 2: PANNELLO DI CONTROLLO -->
+    <div class="card margin-top">
+        <h2>Pannello di Controllo Sensori</h2>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="sensorSelect">Seleziona Sensore Operativo</label>
+                <select id="sensorSelect">
+                    <option value="">Caricamento sensori...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="magnitudeInput">Magnitude (Spike / Drift Rate)</label>
+                <input type="number" id="magnitudeInput" step="0.1" value="3.0">
+            </div>
+        </div>
+
+        <div class="btn-group">
+            <button type="button" class="btn btn-normal" onclick="sendCommand('ModeNormal')">Set Normal</button>
+            <button type="button" class="btn btn-spike" onclick="sendCommand('ModeSpike')">Inietta Spike</button>
+            <button type="button" class="btn btn-drift" onclick="sendCommand('ModeDrift')">Attiva Drift</button>
+            <button type="button" class="btn btn-stop" onclick="sendCommand('ModeStop')">Arresta (Stop)</button>
+        </div>
+
+        <div id="log" class="log-box">Stato: In attesa di comandi...</div>
+    </div>
+
+</div>
+
+<!-- SCHEDA 2: Nuova Dashboard Operatore -->
+<div id="tab-monitoring" class="tab-content">
+    <h2>Pannello Operatore e Monitoraggio Real-time</h2>
+    <div id="sensor-status-list">
+        <!-- Popolato dinamicamente da script.js -->
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
