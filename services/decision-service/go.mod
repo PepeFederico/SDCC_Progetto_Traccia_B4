@@ -1,6 +1,6 @@
 module decision-service
 
-go 1.24
+go 1.25
 
 require (
 	github.com/redis/go-redis/v9 v9.22.0

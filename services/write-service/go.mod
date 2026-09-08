@@ -1,6 +1,6 @@
 module write-service
 
-go 1.24
+go 1.25
 
 require (
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0

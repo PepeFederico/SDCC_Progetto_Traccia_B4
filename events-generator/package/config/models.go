@@ -26,7 +26,7 @@ type SensorConfig struct {
 
 	SogliaMinima  float64 `json:"soglia_minima"`
 	SogliaMassima float64 `json:"soglia_massima"`
-	MaxStdDev     float64 `json:"max_stddev"`
+	MaxStdDev     float64 `json:"max_std_dev"`
 	MaxDrift      float64 `json:"max_drift"`
 }
 

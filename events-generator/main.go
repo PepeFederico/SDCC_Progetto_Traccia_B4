@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	generatorpb "progettoSDCC/proto/event-generator"
 	"syscall"
 	"time"
 
@@ -15,7 +17,94 @@ import (
 	"progettoSDCC/events-generator/package/storage"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/segmentio/kafka-go"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+type GeneratorServer struct {
+	generatorpb.UnimplementedEventGeneratorServer
+	temperatureWriter *kafka.Writer
+	pressureWriter    *kafka.Writer
+	redisClient       *redis.Client
+	ctx               context.Context
+	stopChan          chan struct{}
+}
+
+// InsertNewSensor viene invocato dall'API Gateway via gRPC
+func (server *GeneratorServer) InsertNewSensor(_ context.Context, req *generatorpb.Sensor) (*generatorpb.Response, error) {
+	log.Printf("[Generatore] Ricevuto comando gRPC per nuovo sensore: ID=%s, Tipo=%s", req.GetSensorId(), req.GetType())
+
+	// 1. Mappa il messaggio Protobuf nella struct interna del generatore (model.SensorConfig)
+	cfg := model.SensorConfig{
+		SensorID:         req.GetSensorId(),
+		Type:             req.GetType(),
+		MachineToControl: req.GetMachineToControl(),
+		BaseMean:         float64(req.GetBaseMean()),
+		Variance:         float64(req.GetVariance()),
+		Interval:         time.Duration(req.GetIntervalNano()),
+		SogliaMinima:     float64(req.GetSogliaMinima()),
+		SogliaMassima:    float64(req.GetSogliaMassima()),
+		MaxStdDev:        float64(req.GetMaxStdDev()),
+		MaxDrift:         float64(req.GetMaxDrift()),
+	}
+
+	// 2. Avvia dinamicamente il worker usando i writer già inizializzati nel main
+	switch cfg.Type {
+	case "TemperatureSensor":
+		sensor.StartSensor(server.ctx, cfg, server.stopChan, server.temperatureWriter, server.redisClient)
+	case "PressureSensor":
+		sensor.StartSensor(server.ctx, cfg, server.stopChan, server.pressureWriter, server.redisClient)
+	}
+
+	return &generatorpb.Response{
+		Done:    true,
+		Message: fmt.Sprintf("Sensore %s avviato con successo tramite gRPC", req.GetSensorId()),
+	}, nil
+}
+
+// LoadSensorType viene invocato dall'API Gateway via gRPC
+func (server *GeneratorServer) LoadSensorType(_ context.Context, _ *generatorpb.LoadSensorTypeRequest) (*generatorpb.SensorType, error) {
+
+	types := []string{"TemperatureSensor", "PressureSensor"}
+	return &generatorpb.SensorType{
+		Type: types,
+	}, nil
+}
+
+// RetriveActiveSensor viene invocato dall'API Gateway via gRPC
+func (server *GeneratorServer) RetriveActiveSensor(_ context.Context, _ *generatorpb.GetActiveSensorRequest) (*generatorpb.ActiveSensor, error) {
+
+	activeSensor := sensor.GetActiveSensors()
+	return &generatorpb.ActiveSensor{
+		Sensor: activeSensor,
+	}, nil
+}
+
+// ChangeMode viene invocato dall'API Gateway via gRPC
+func (server *GeneratorServer) ChangeMode(_ context.Context, req *generatorpb.Mode) (*generatorpb.Response, error) {
+	log.Printf("[Generatore] Ricevuto comando gRPC per il sensore: ID=%s", req.GetSensorId())
+
+	cmd := model.StateCommand{
+		Mode:           model.OperationalMode(req.GetMode()),
+		DriftRate:      float64(req.GetValue()),
+		SpikeMagnitude: float64(req.GetValue()),
+		SensorID:       req.GetSensorId(),
+	}
+
+	// Invio del comando al sensore
+	if success := sensor.SendControlCommand(cmd.SensorID, cmd); !success {
+		// In gRPC non si usa http.Error, ma i codici di stato gRPC
+		return nil, status.Errorf(codes.NotFound, "Sensore %s non trovato", cmd.SensorID)
+	}
+
+	// Risposta gRPC corretta in caso di successo
+	return &generatorpb.Response{
+		Done:    true,
+		Message: fmt.Sprintf("Comando inviato con successo al sensore %s", cmd.SensorID),
+	}, nil
+}
 
 func main() {
 	broker := os.Getenv("KAFKA_BROKER")
@@ -104,14 +193,28 @@ func main() {
 		}
 	}
 
-	dashServerWriter := model.NewDashboardServer(temperatureWriter, pressureWriter, signalWriter, conn)
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("Impossibile mettersi in ascolto sulla porta gRPC 50051: %v", err)
+	}
 
-	sensor.StartDashboardServer(ctx, "8081", stopChan, dashServerWriter)
+	grpcServer := grpc.NewServer()
+	generatorServerInstance := &GeneratorServer{
+		temperatureWriter: temperatureWriter,
+		pressureWriter:    pressureWriter,
+		redisClient:       conn,
+		ctx:               ctx,
+		stopChan:          stopChan,
+	}
 
-	//time.Sleep(20 * time.Second)
+	generatorpb.RegisterEventGeneratorServer(grpcServer, generatorServerInstance)
 
-	// Simulazione invio segnale di stop via Kafka
-	//pkgKafka.SimulationReceiveMessage(signalWriter, "SN7F9A2K4L1X9W3")
+	go func() {
+		log.Println("[Events-Generator] Server gRPC in ascolto sulla porta :50051...")
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("Errore durante l'esecuzione del server gRPC: %v", err)
+		}
+	}()
 
 	// Graceful Shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -119,7 +222,9 @@ func main() {
 	<-sigChan
 
 	fmt.Println("\nArresto applicazione...")
-	close(stopChan) // Segnala a Sensori e Dashboard HTTP di fermarsi
+	close(stopChan)
+
+	grpcServer.GracefulStop()
 
 	// Dà il tempo alle goroutine di uscire dai loop prima di chiudere i socket TCP
 	time.Sleep(200 * time.Millisecond)

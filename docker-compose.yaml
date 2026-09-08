@@ -62,7 +62,7 @@ services:
     container_name: events_generator
     restart: unless-stopped
     ports:
-      - "8081:8081" # Espone la Dashboard HTTP
+      - "50051:50051"
     environment:
       - KAFKA_BROKER=kafka:9096 # Usa la porta interna di Kafka
       - REDIS_ADDRESS=redis:6379
@@ -74,7 +74,23 @@ services:
         condition: service_healthy
     networks:
       - sdcc_progetto
-
+  # ----------------------------
+  # Front-End (API Gateway)
+  # ----------------------------
+  front-end:
+    build:
+      context: .
+      dockerfile: front-end/Dockerfile
+    container_name: front-end
+    ports:
+      - "8080:8080"
+    environment:
+      - GENERATOR_GRPC_HOST=events-generator:50051
+    depends_on:
+      - events-generator
+    networks:
+      - sdcc_progetto
+    restart: on-failure
   # ----------------------------
   # Servizio --> Ingestion-Service (Go)
   # ----------------------------
