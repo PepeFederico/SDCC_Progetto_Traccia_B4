@@ -127,91 +127,108 @@ async function loadSensorTypes() {
 }
 
 
-// --- NUOVA LOGICA: GESTIONE TAB SPA & MONITORAGGIO OPERATORE ---
+// --- GESTIONE TAB SPA & MONITORAGGIO ---
 
-function openTab(tabName) {
+function openTab(tabName, evt) {
     // Nascondi tutti i contenuti
     document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
     // Disattiva tutti i bottoni
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
     // Attiva la tab richiesta
-    const targetTab = document.getElementById(`tab-${tabName}`);
-    if (targetTab) targetTab.classList.add('active');
-
-    // Evidenzia il bottone cliccato
-    if (window.event && window.event.currentTarget) {
-        window.event.currentTarget.classList.add('active');
+    const targetTab = document.getElementById(`tab-${tabName}`) || document.getElementById(tabName);
+    if (targetTab) {
+        targetTab.classList.add('active');
     }
 
-    // Se passiamo al monitoraggio, aggiorna le card dei sensori
+    // Evidenzia il bottone cliccato
+    if (evt && evt.currentTarget) {
+        evt.currentTarget.classList.add('active');
+    } else {
+        // Fallback: cerca il bottone associato se chiamato da codice
+        const btn = document.querySelector(`.tab-btn[onclick*="${tabName}"]`);
+        if (btn) btn.classList.add('active');
+    }
+
+    // Se entriamo nella tab di monitoraggio, eseguiamo subito il fetch delle metriche
     if (tabName === 'monitoring') {
-        refreshMonitoring();
+        refreshMetrics();
     }
 }
 
-// Polling/Fetch per la Dashboard Operatore (Scheda 2)
-async function refreshMonitoring() {
+// --- FETCH & POLLING METRICHE ---
+
+async function refreshMetrics() {
     try {
-        const res = await fetch('/api/sensors/status'); // Endpoint per avere lista dettagliata + stato FSM
-        const sensorList = await res.json();
+        const res = await fetch('/api/monitoring/sensor');
+        const data = await res.json();
 
-        const container = document.getElementById('sensor-status-list');
-        container.innerHTML = '';
+        // LOG DI DEBUG: Apri la console del browser (F12) per verificare la struttura esatta ricevuta!
+        console.log("[DEBUG Metrics Data]:", data);
 
-        if (!sensorList || sensorList.length === 0) {
-            container.innerHTML = '<p>Nessun sensore disponibile nel sistema.</p>';
+        const tbody = document.getElementById('metrics-table-body');
+        if (!tbody) return;
+
+        if (data.status !== 'SUCCESS' || !data.metrics || data.metrics.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-text">Nessuna metrica disponibile al momento.</td></tr>';
             return;
         }
 
-        sensorList.forEach(sensor => {
-            // sensor = { id: "S1", state: "READY", machine: "Pressa-1", type: "Vibration" }
-            const stateClass = (sensor.state || 'READY').toLowerCase();
+        tbody.innerHTML = ''; // Pulizia tabella
 
-            const card = document.createElement('div');
-            card.className = `sensor-card state-${stateClass}`;
-            card.innerHTML = `
-                <div class="sensor-header">
-                    <span class="sensor-title">${sensor.id}</span>
-                    <span class="status-badge ${stateClass}">${sensor.state}</span>
-                </div>
-                <div class="sensor-details">
-                    <div>Macchina: <b>${sensor.machineToControl || 'N/D'}</b></div>
-                    <div>Tipo: <b>${sensor.type || 'N/D'}</b></div>
-                </div>
-                <div class="sensor-actions">
-                    <button class="btn btn-danger" onclick="sendOperatorCommand('${sensor.id}', 'STOP')">STOP</button>
-                    <button class="btn btn-warning" onclick="sendOperatorCommand('${sensor.id}', 'RESTART')">RESTART</button>
-                </div>
+        data.metrics.forEach(metric => {
+            // Estrazione sicura dei campi gestendo sia camelCase che snake_case (e controllando 'undefined')
+            const stdDevValue = metric.stdDev !== undefined ? metric.stdDev : metric.std_dev;
+            const rateOfChangeValue = metric.rateOfChange !== undefined ? metric.rateOfChange : metric.rate_of_change;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><b>${metric.sensorId || metric.sensor_id || 'N/D'}</b></td>
+                <td>${metric.machineId || metric.machine_id || 'N/D'}</td>
+                <td>${formatNumber(metric.media)}</td>
+                <td>${formatNumber(metric.minimo)}</td>
+                <td>${formatNumber(metric.massimo)}</td>
+                <td>${formatNumber(stdDevValue)}</td>
+                <td>${formatNumber(rateOfChangeValue)}</td>
             `;
-            container.appendChild(card);
+            tbody.appendChild(row);
         });
     } catch (err) {
-        console.error("Errore durante il caricamento del monitoraggio:", err);
+        console.error("Errore durante il recupero delle metriche:", err);
     }
 }
 
-// Invio comandi diretti dall'operatore
-async function sendOperatorCommand(sensorId, action) {
-    try {
-        await fetch('/api/operator/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sensorId: sensorId, action: action })
-        });
-        setTimeout(refreshMonitoring, 300);
-    } catch (err) {
-        console.error("Errore invio comando operatore:", err);
-    }
+// Utility per formattare i decimali a 2 cifre
+function formatNumber(val) {
+    if (val === undefined || val === null || isNaN(val)) return '-';
+    return Number(val).toFixed(8);
 }
 
-// INIZIALIZZAZIONE
+// --- INIZIALIZZAZIONE UNIFICATA ---
+
 document.addEventListener('DOMContentLoaded', () => {
-    loadSensors();
-    loadSensorTypes();
+    // 1. Carica i dati iniziali dei form/selezioni
+    if (typeof loadSensors === 'function') loadSensors();
+    if (typeof loadSensorTypes === 'function') loadSensorTypes();
 
+    // 2. Registra l'evento di invio del form
     const form = document.getElementById('InsertNewSensor');
-    if (form) {
+    if (form && typeof createNewSensor === 'function') {
         form.addEventListener('submit', createNewSensor);
     }
+
+    // 3. Ticker periodico in background per le metriche real-time
+    setInterval(() => {
+        // Controlla se la tab è attiva sia tramite classe 'active' sia tramite visibilità CSS
+        const monitoringTab = document.getElementById('tab-monitoring') || document.getElementById('monitoring');
+
+        if (monitoringTab) {
+            const isActive = monitoringTab.classList.contains('active');
+            const isVisible = window.getComputedStyle(monitoringTab).display !== 'none';
+
+            if (isActive || isVisible) {
+                refreshMetrics();
+            }
+        }
+    }, 120 * 1000);
 });

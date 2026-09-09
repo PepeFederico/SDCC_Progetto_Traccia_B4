@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	sinkpb "progettoSDCC/proto/sink-service"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,8 @@ import (
 )
 
 type Gateway struct {
-	genClient generatorpb.EventGeneratorClient
+	genClient  generatorpb.EventGeneratorClient
+	sinkClient sinkpb.SinkServiceClient
 }
 
 //go:embed web-page/*
@@ -73,6 +75,12 @@ func main() {
 		grpcHost = "localhost:50051" // Fallback per l'esecuzione locale senza Docker
 	}
 
+	grpcHostSink := os.Getenv("SINK_GRPC_HOST")
+	if grpcHostSink == "" {
+		grpcHostSink = "localhost:50052"
+	}
+
+	//	Connessione al Client del Generatore
 	log.Printf("[API-Gateway] Connessione al servizio gRPC su: %s", grpcHost)
 	conn, err := grpc.Dial(grpcHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -84,22 +92,55 @@ func main() {
 		}
 	}(conn)
 
+	//	Connessione al CLinet del Sink
+	log.Printf("[API-Gateway] Connessione al servizio gRPC su: %s", grpcHost)
+	connSink, err := grpc.Dial(grpcHostSink, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Impossibile connettersi al Generatore gRPC: %v", err)
+	}
+	defer func(connSink *grpc.ClientConn) {
+		if err := connSink.Close(); err != nil {
+			log.Printf("Errore durante la chiusura della connessione gRPC: %v", err)
+		}
+	}(connSink)
+
 	gateway := &Gateway{
-		genClient: generatorpb.NewEventGeneratorClient(conn),
+		genClient:  generatorpb.NewEventGeneratorClient(conn),
+		sinkClient: sinkpb.NewSinkServiceClient(connSink),
 	}
 
 	// 5. Endpoints API
 	r.POST("/api/sensors", gateway.handleCreateSensor)
 	r.GET("/api/sensors", gateway.handleRetrieveActiveSensor)
-
 	r.GET("/api/sensor-types", gateway.handleRetrieveType)
 	r.POST("/api/command", gateway.handleSendCommand)
+
+	r.GET("/api/monitoring/sensor", gateway.handleRetrieveMetricsSensor)
 
 	// 6. Avvio server HTTP su 0.0.0.0 per rendere visibile la porta fuori dal container
 	fmt.Println("[API-Gateway] Server HTTP in ascolto sulla porta :8080...")
 	if err := r.Run("0.0.0.0:8080"); err != nil {
 		log.Fatalf("Errore arresto API Gateway: %v", err)
 	}
+}
+
+func (gw *Gateway) handleRetrieveMetricsSensor(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	resp, err := gw.sinkClient.GetMetricsSnapshot(ctx, &sinkpb.SnapshotRequest{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "ERROR",
+			"error":  "Errore gRPC Sink-Service: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  resp.GetMessage(),
+		"metrics": resp.GetMetrics(),
+	})
 }
 
 func (gw *Gateway) handleCreateSensor(c *gin.Context) {

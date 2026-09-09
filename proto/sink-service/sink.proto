@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package sink;
+option go_package = "progettoSDCC/proto/sink-service;sinkpb";
+
+service SinkService {
+  rpc GetMetricsSnapshot(SnapshotRequest) returns (SnapshotResponse);
+}
+
+message SnapshotResponse {
+  repeated SensorMetric metrics = 1;
+  string message                = 2;
+}
+
+message SensorMetric {
+  string machine_id     = 1;
+  string sensor_id      = 2;
+  double media          = 3;
+  double minimo         = 4;
+  double massimo        = 5;
+  double std_dev        = 6;
+  double rate_of_change = 7;
+}
+
+message SnapshotRequest {}

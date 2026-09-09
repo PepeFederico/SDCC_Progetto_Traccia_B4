@@ -86,8 +86,10 @@ services:
       - "8080:8080"
     environment:
       - GENERATOR_GRPC_HOST=events-generator:50051
+      - SINK_GRPC_HOST=sink-service:50052
     depends_on:
       - events-generator
+      - sink-service
     networks:
       - sdcc_progetto
     restart: on-failure
@@ -223,16 +225,19 @@ services:
   # ----------------------------
   sink-service:
     build:
-      context: ./services/sink-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/sink-service/Dockerfile
     container_name: sink_service
     restart: unless-stopped
+    ports:
+      - "50052:50052"
     environment:
       - KAFKA_BROKER=kafka:9096
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=my-super-secret-token
       - INFLUXDB_ORGANIZATION=sdcc_org
       - INFLUXDB_BUCKET=measurement
+      - GRPC_PORT=50052
     depends_on:
       init-kafka:
         condition: service_completed_successfully

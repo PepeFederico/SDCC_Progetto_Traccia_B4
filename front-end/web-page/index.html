@@ -8,8 +8,8 @@
 <body>
 <!-- Menu a Schede Centralizzato -->
 <nav class="navbar">
-    <button class="tab-btn active" onclick="openTab('generator')">Simulatore & Anomalie</button>
-    <button class="tab-btn" onclick="openTab('monitoring')">Monitoraggio & Controllo</button>
+    <button class="tab-btn active" onclick="openTab('generator', event)">Simulatore & Anomalie</button>
+    <button class="tab-btn" onclick="openTab('monitoring', event)">Monitoraggio & Controllo</button>
 </nav>
 
 <!-- SCHEDA 1: La tua pagina attuale del generatore -->
@@ -129,8 +129,32 @@
 <!-- SCHEDA 2: Nuova Dashboard Operatore -->
 <div id="tab-monitoring" class="tab-content">
     <h2>Pannello Operatore e Monitoraggio Real-time</h2>
-    <div id="sensor-status-list">
-        <!-- Popolato dinamicamente da script.js -->
+
+    <!-- Stato FSM Sensori (Card) -->
+    <div id="sensor-status-list"></div>
+
+    <h3 style="margin-top: 30px;">Metriche Calcolate dai Sensori</h3>
+
+    <!-- Tabella Metriche Real-time -->
+    <div class="table-container">
+        <table class="metrics-table">
+            <thead>
+            <tr>
+                <th>Sensore</th>
+                <th>Macchina</th>
+                <th>Media</th>
+                <th>Minimo</th>
+                <th>Massimo</th>
+                <th>StdDev</th>
+                <th>Rate of Change</th>
+            </tr>
+            </thead>
+            <tbody id="metrics-table-body">
+            <tr>
+                <td colspan="7" class="loading-text">Caricamento metriche in corso...</td>
+            </tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
