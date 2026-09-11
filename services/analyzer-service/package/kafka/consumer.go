@@ -13,6 +13,6 @@ func NewKafkaConsumer(broker string) *kafka.Reader {
 		GroupID:  "analyzer-service-group",
 		MinBytes: 10,
 		MaxBytes: 10e6,
-		MaxWait:  500 * time.Millisecond,
+		MaxWait:  10 * time.Millisecond,
 	})
 }

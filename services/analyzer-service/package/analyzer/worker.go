@@ -57,9 +57,9 @@ func SensorWorker(ctx context.Context, sensorID string, channels *model.SensorCh
 
 func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, checkpoint func()) {
 
-	windowDuration := 2 * time.Minute
-	slideInterval := 1 * time.Minute
-	watermarkDelay := 1 * time.Minute // Tolleranza ritardi di 1 minuto
+	windowDuration := 60 * time.Second // Finestra di osservazione più stretta
+	slideInterval := 30 * time.Second  // Ricalcola e pubblica ogni 2 SECONDI
+	watermarkDelay := 15 * time.Second // Tolleranza ritardi ridotta a 5s
 
 	defer activeWorkers.Delete(w.state.SensorID)
 
@@ -140,7 +140,7 @@ func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, check
 
 			// Processamento della finestra --> Calcolo delle metriche
 			if windowToProcess != nil {
-				processWindow(w.writer, w.state.SensorID, w.state.MachineID, *windowToProcess, currentWatermark)
+				go processWindow(w.writer, w.state.SensorID, w.state.MachineID, *windowToProcess, currentWatermark)
 			}
 
 		case state := <-w.invalidDataChannel:

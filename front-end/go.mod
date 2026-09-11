@@ -1,4 +1,4 @@
-module front-end
+module progettoSDCC/front-end
 
 go 1.25.0
 

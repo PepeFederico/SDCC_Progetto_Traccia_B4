@@ -230,5 +230,69 @@ document.addEventListener('DOMContentLoaded', () => {
                 refreshMetrics();
             }
         }
-    }, 120 * 1000);
+    }, 60 * 1000);
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Apri la connessione SSE verso lo endpoint alimentato da Redis
+    const eventSource = new EventSource('/api/monitoring/sensor/stream');
+
+    eventSource.addEventListener('sensor_data', (event) => {
+        // Parsa il JSON inviato da Redis
+        const sensorMetric = JSON.parse(event.data);
+
+        // Aggiorna o crea la Card nel DOM
+        updateOrCreateSensorCard(sensorMetric);
+    });
+
+    eventSource.onerror = (err) => {
+        console.error("Errore nella connessione Pub/Sub Real-Time:", err);
+    };
+});
+
+/**
+ * Funzione per creare o aggiornare la Card sintetica del sensore
+ */
+function updateOrCreateSensorCard(sensorData) {
+    const grid = document.getElementById('sensors-grid');
+    if (!grid) return;
+
+    const sensorId = sensorData.sensorId || 'N/D';
+    const machineId = sensorData.machineId || 'N/D';
+    const rawStatus = (sensorData.status || 'READY').toUpperCase();
+
+    // Mappatura classe CSS e colore in base ai 3 stati
+    let statusClass = 'status-ready';
+    let statusLabel = 'READY';
+
+    if (rawStatus === 'STOPPED') {
+        statusClass = 'status-stopped';
+        statusLabel = 'STOPPED';
+    } else if (rawStatus === 'WARM-UP' || rawStatus === 'WARM_UP') {
+        statusClass = 'status-warmup';
+        statusLabel = 'WARM-UP';
+    }
+
+    // Cerca se la card esiste già
+    let card = document.getElementById(`card-${sensorId}`);
+
+    if (!card) {
+        card = document.createElement('div');
+        card.id = `card-${sensorId}`;
+        grid.appendChild(card);
+    }
+
+    // Assegna la classe base e quella relativa allo stato corrente
+    card.className = `sensor-card ${statusClass}`;
+
+    // Contenuto minimale della Card
+    card.innerHTML = `
+        <div class="sensor-header">
+            <div>
+                <div class="sensor-title">${sensorId}</div>
+                <small style="color: #64748b;">Macchina: <b>${machineId}</b></small>
+            </div>
+            <span class="status-badge ${statusClass}">${statusLabel}</span>
+        </div>
+    `;
+}

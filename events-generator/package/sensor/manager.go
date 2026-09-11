@@ -2,6 +2,7 @@ package sensor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -41,6 +42,23 @@ func StartSensor(ctx context.Context, cfg config.SensorConfig, stopChan <-chan s
 	//	Pubblicazione per aggiornare la cache locale degli altri servizi sfruttando Pub/Sub Redis
 	eventPayload := fmt.Sprintf("%s:%s", cfg.SensorID, "READY")
 	conn.Publish(ctx, "sensor:state-events", eventPayload)
+
+	//	Pubblicazione per aggiornare la dashboard, sfruttando Redis Pub/Sub
+	dashboardPayload := config.DashboardInfo{
+		SensorID:  cfg.SensorID,
+		MachineID: cfg.MachineToControl,
+		Status:    "READY",
+	}
+
+	jsonBytes, err := json.Marshal(dashboardPayload)
+	if err != nil {
+		log.Printf("Error marshalling dashboardInfo : %v", err)
+	}
+
+	// 1. SALVA LO STATO COMPLETO NELLA HASH (FONDAMENTALE per i nuovi client SSE!)
+	conn.HSet(ctx, "sensors:current_status", cfg.SensorID, string(jsonBytes))
+
+	conn.Publish(ctx, "sensor:status", string(jsonBytes))
 
 	log.Printf("[%s] Sensore registrato con stato: %s", cfg.SensorID, eventPayload)
 

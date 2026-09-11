@@ -1,0 +1,19 @@
+import "math"
+
+from(bucket: "measurement")
+  |> range(start: -3m)
+  |> filter(fn: (r) => r["_measurement"] == "sensor_metrics")
+  |> filter(fn: (r) =>
+      r["_field"] == "media" or
+      r["_field"] == "minimo" or
+      r["_field"] == "massimo" or
+      r["_field"] == "std-dev" or
+      r["_field"] == "rate-of-change"
+  )
+  |> group(columns: ["machine_id", "sensor_id", "_field"])
+  |> aggregateWindow(every: 2m, fn: mean, createEmpty: false)
+  |> last()
+  // Arrotonda i float a 4 cifre decimali prima di fare il pivot
+  |> map(fn: (r) => ({ r with _value: math.round(x: r._value * 10000.0) / 10000.0 }))
+  |> pivot(rowKey:["machine_id", "sensor_id"], columnKey: ["_field"], valueColumn: "_value")
+  |> yield(name: "complete_metrics")

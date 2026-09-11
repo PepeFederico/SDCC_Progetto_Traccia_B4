@@ -70,3 +70,9 @@ type RedisParameter struct {
 	Password  string
 	DefaultDB int
 }
+
+type DashboardInfo struct {
+	SensorID  string `json:"sensorId"`
+	MachineID string `json:"machineId"`
+	Status    string `json:"status"`
+}

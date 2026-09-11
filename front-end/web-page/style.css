@@ -116,7 +116,7 @@ h2 {
     font-weight: 700;
     color: var(--accent-blue);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
     margin: 18px 0 10px 0;
 }
 
@@ -384,3 +384,48 @@ input:focus {
     font-style: italic;
     padding: 20px !important;
 }
+
+.sensors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+}
+
+.sensor-card {
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    border-left: 6px solid #ccc;
+    transition: all 0.3s ease;
+}
+
+.sensor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sensor-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+}
+
+/* Colorazioni in base allo stato */
+.sensor-card.status-ready { border-left-color: #10b981; }
+.status-badge.status-ready { background: #d1fae5; color: #065f46; }
+
+.sensor-card.status-stopped { border-left-color: #ef4444; }
+.status-badge.status-stopped { background: #fee2e2; color: #991b1b; }
+
+.sensor-card.status-warmup { border-left-color: #f59e0b; }
+.status-badge.status-warmup { background: #fef3c7; color: #92400e; }

@@ -12,7 +12,11 @@ import (
 	sinkpb "progettoSDCC/proto/sink-service"
 	"time"
 
+	model "progettoSDCC/front-end/config"
+	"progettoSDCC/front-end/storage"
+
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -23,6 +27,7 @@ import (
 type Gateway struct {
 	genClient  generatorpb.EventGeneratorClient
 	sinkClient sinkpb.SinkServiceClient
+	connRedis  *redis.Client
 }
 
 //go:embed web-page/*
@@ -30,6 +35,27 @@ var embeddedFiles embed.FS
 
 func main() {
 	r := gin.Default()
+
+	//	Parametri connessione a Redis
+	//	Inizializzazione Connessione DB Redis
+	parametersRedis := model.RedisParameter{
+		Address:   os.Getenv("REDIS_ADDRESS"),
+		Password:  os.Getenv("REDIS_PASSWORD"),
+		DefaultDB: 0,
+	}
+
+	clientRedis, err := storage.NewRedisWriter(parametersRedis)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func(conn *redis.Client) {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Errore chiusura connessione Redis: %v", err)
+		}
+	}(clientRedis)
+
+	//----------------------------------------------------------------------------------------------//
 
 	// 1. Parsing dei file HTML incorporati
 	templ, err := template.Must(template.New("").ParseFS(embeddedFiles, "web-page/*.html")), error(nil)
@@ -107,6 +133,7 @@ func main() {
 	gateway := &Gateway{
 		genClient:  generatorpb.NewEventGeneratorClient(conn),
 		sinkClient: sinkpb.NewSinkServiceClient(connSink),
+		connRedis:  clientRedis,
 	}
 
 	// 5. Endpoints API
@@ -116,6 +143,7 @@ func main() {
 	r.POST("/api/command", gateway.handleSendCommand)
 
 	r.GET("/api/monitoring/sensor", gateway.handleRetrieveMetricsSensor)
+	r.GET("/api/monitoring/sensor/stream", gateway.handleStreamSensor)
 
 	// 6. Avvio server HTTP su 0.0.0.0 per rendere visibile la porta fuori dal container
 	fmt.Println("[API-Gateway] Server HTTP in ascolto sulla porta :8080...")
@@ -141,6 +169,43 @@ func (gw *Gateway) handleRetrieveMetricsSensor(c *gin.Context) {
 		"status":  resp.GetMessage(),
 		"metrics": resp.GetMetrics(),
 	})
+}
+
+func (gw *Gateway) handleStreamSensor(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	c.Writer.Flush()
+
+	// A. INVIA SUBITO LO STATO INIZIALE DI TUTTI I SENSORI SALVATI IN REDIS
+	savedSensors, err := gw.connRedis.HGetAll(c.Request.Context(), "sensors:current_status").Result()
+	if err == nil && len(savedSensors) > 0 {
+		for _, sensorJSON := range savedSensors {
+			c.SSEvent("sensor_data", sensorJSON)
+		}
+		c.Writer.Flush()
+	}
+
+	// B. SOTTOSCRIZIONE PUB/SUB PER CAMBIAMENTI FUTURI IN REAL-TIME
+	pubSub := gw.connRedis.Subscribe(context.Background(), "sensor:status")
+	defer pubSub.Close()
+
+	ch := pubSub.Channel()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			c.SSEvent("sensor_data", msg.Payload)
+			c.Writer.Flush()
+		}
+	}
 }
 
 func (gw *Gateway) handleCreateSensor(c *gin.Context) {

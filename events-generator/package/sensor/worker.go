@@ -90,7 +90,7 @@ func temperatureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopC
 			temp := currentMean + noise
 			whatWeDo := rand.Float64()
 
-			if whatWeDo < 0.03 {
+			if whatWeDo < 0.01 {
 				// CASO 1: Dato Corrotto
 				payload = config.TemperatureReading{
 					MessageID:   generateULID(),
@@ -100,7 +100,7 @@ func temperatureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopC
 					Temperature: -999.99,
 				}
 
-			} else if whatWeDo < 0.08 {
+			} else if whatWeDo < 0.03 {
 				// CASO 2: Picco Fuori Scala (Outlier)
 				outlierTemp := currentMean + (noise * 5)
 
@@ -208,7 +208,7 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 			// 2. Estraiamo un singolo valore per decidere il tipo di evento
 			whatWeDo := rand.Float64()
 
-			if whatWeDo < 0.03 {
+			if whatWeDo < 0.01 {
 				// CASO 1 (3% delle volte): Dato Corrotto (es. NaN)
 				payload = config.PressureReading{
 					MessageID: generateULID(),
@@ -218,7 +218,7 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 					Pressure:  -999.99,
 				}
 
-			} else if whatWeDo < 0.08 {
+			} else if whatWeDo < 0.03 {
 				// CASO 2 (5% delle volte, cioè tra 0.03 e 0.08): Picco Fuori Scala (Outlier)
 				outlierPressure := currentMean + (noise * 5) // Moltiplichiamo il rumore per generare un picco
 
@@ -306,6 +306,24 @@ func updateState(ctx context.Context, cfg config.SensorConfig, conn *redis.Clien
 		eventPayload := fmt.Sprintf("%s:%s", cfg.SensorID, state)
 		conn.Publish(ctx, "sensor:state-events", eventPayload)
 		log.Printf("[%s] Stato aggiornato: %s", cfg.SensorID, state)
+
+		publishToDashboard(cfg, state, conn, ctx)
 	}
 	return updateSensorState
+}
+
+func publishToDashboard(cfg config.SensorConfig, state string, conn *redis.Client, ctx context.Context) {
+	//	Pubblicazione per aggiornare la dashboard, sfruttando Redis Pub/Sub
+	dashboardPayload := config.DashboardInfo{
+		SensorID:  cfg.SensorID,
+		MachineID: cfg.MachineToControl,
+		Status:    state,
+	}
+
+	jsonBytes, err := json.Marshal(dashboardPayload)
+	if err != nil {
+		log.Printf("Error marshalling dashboardInfo : %v", err)
+	}
+
+	conn.Publish(ctx, "sensor:status", string(jsonBytes))
 }

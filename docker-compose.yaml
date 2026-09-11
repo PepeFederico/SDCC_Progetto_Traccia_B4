@@ -87,9 +87,12 @@ services:
     environment:
       - GENERATOR_GRPC_HOST=events-generator:50051
       - SINK_GRPC_HOST=sink-service:50052
+      - REDIS_ADDRESS=redis:6379
+      - REDIS_PASSWORD=qwertyuiopo1
     depends_on:
       - events-generator
       - sink-service
+      - redis
     networks:
       - sdcc_progetto
     restart: on-failure
@@ -252,7 +255,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis
-    command: redis-server --requirepass qwertyuiopo1
+    command: ["redis-server", "--requirepass", "qwertyuiopo1", "--save", "", "--appendonly", "no"]
     ports:
       - "6379:6379"
     healthcheck:
