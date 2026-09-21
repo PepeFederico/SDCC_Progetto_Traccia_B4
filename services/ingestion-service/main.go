@@ -41,7 +41,7 @@ func main() {
 		writerTopic,
 		"pressure-group",
 		func(press float64) bool {
-			return press >= 0 && press <= 100 // Pressione valida
+			return press >= 0 && press <= 300 // Pressione valida
 		},
 	)
 

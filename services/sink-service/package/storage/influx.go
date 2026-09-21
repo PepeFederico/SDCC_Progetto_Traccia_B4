@@ -93,7 +93,9 @@ func (writer *InfluxClient) GetMetricsSnapshot(ctx context.Context) ([]*sinkpb.S
 	if err != nil {
 		return nil, fmt.Errorf("errore query InfluxDB: %w", err)
 	}
-	defer result.Close()
+	defer func(result *api.QueryTableResult) {
+		_ = result.Close()
+	}(result)
 
 	var metrics []*sinkpb.SensorMetric
 
