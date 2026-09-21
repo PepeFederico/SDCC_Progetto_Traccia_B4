@@ -64,10 +64,10 @@ func main() {
 		<-sigChan
 		log.Println("[Sink-Service] Ricevuto segnale di arresto, avvio shutdown...")
 
-		// 1. Ferma le letture da Kafka
+		// 1. Ferma le letture da Kafka cancellando il contesto del reader
 		cancel()
 
-		// 2. Ferma in modo pulito il server gRPC (non accetta più nuove RPC)
+		// 2. Ferma in modo pulito il server gRPC
 		grpcServer.GracefulStop()
 	}()
 
@@ -78,45 +78,87 @@ func main() {
 		msg, err := reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				// Context cancellato: usciamo dal loop puliti
+				// Context cancellato: arresto controllato
 				break
 			}
 			log.Printf("[Kafka Error] Errore lettura: %v", err)
 			continue
 		}
 
-		var t storage.ProcessedData
-		if err := json.Unmarshal(msg.Value, &t); err != nil {
-			log.Printf("[Kafka Error] Errore unmarshal (messaggio scartato): %v", err)
-			_ = reader.CommitMessages(ctx, msg)
-			continue
-		}
+		// Isolamento dell'iterazione in una closure per la gestione pulita di defer e commitCtx
+		func() {
+			commitCtx, commitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer commitCancel()
 
-		parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
-		if err != nil {
-			parsedTime = time.Now().UTC()
-		}
+			var event storage.MessageStreamEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("[Sink Error] Errore unmarshal MessageStreamEvent (scarto): %v", err)
+				_ = reader.CommitMessages(commitCtx, msg)
+				return
+			}
 
-		payload := storage.DataPoint{
-			SensorID:     t.SensorID,
-			MachineID:    t.MachineID,
-			Minimo:       t.Minimo,
-			Media:        t.Media,
-			Massimo:      t.Massimo,
-			StdDev:       t.StdDev,
-			RateOfChange: t.RateOfChange,
-			Timestamp:    parsedTime,
-		}
+			// -----------------------------------------------------------------
+			// CASO B: Gestione del DATO SENSORIALE (DATA)
+			// -----------------------------------------------------------------
+			if event.Type == "LATENCY_MARKER" && event.Marker != nil {
+				nowNano := time.Now().UnixNano()
+				totalLatencyMs := float64(nowNano-event.Marker.IngressTimestampNano) / 1e6
 
-		// Scrittura asincrona in buffer
-		client.WritePoints(&payload)
+				log.Printf("[LATENCY E2E] Latenza Totale Pipeline: %.2f ms", totalLatencyMs)
 
-		// Commit offset
-		if err := reader.CommitMessages(ctx, msg); err != nil {
-			log.Printf("[Kafka Error] Errore commit offset: %v", err)
-		}
+				if err := reader.CommitMessages(commitCtx, msg); err != nil {
+					log.Printf("[Sink Error] Errore commit offset marker: %v", err)
+				}
+				return
+			}
 
-		log.Printf("[DEBUG] Scritto punto per macchinario: %s, sensore: %s", payload.MachineID, payload.SensorID)
+			// -----------------------------------------------------------------
+			// CASO B: Gestione del DATO SENSORIALE (DATA)
+			// -----------------------------------------------------------------
+			if event.Type == "DATA" && len(event.Payload) > 0 {
+				var t storage.ProcessedData
+				if err := json.Unmarshal(event.Payload, &t); err != nil {
+					log.Printf("[Sink Error] Errore unmarshal ProcessedData (scarto): %v", err)
+					_ = reader.CommitMessages(commitCtx, msg)
+					return
+				}
+
+				sensorID := t.SensorID
+				if sensorID == "" {
+					sensorID = string(msg.Key)
+				}
+
+				parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
+				if err != nil {
+					parsedTime = time.Now().UTC()
+				}
+
+				payload := storage.DataPoint{
+					SensorID:     sensorID,
+					MachineID:    t.MachineID,
+					Minimo:       t.Minimo,
+					Media:        t.Media,
+					Massimo:      t.Massimo,
+					StdDev:       t.StdDev,
+					RateOfChange: t.RateOfChange,
+					Timestamp:    parsedTime,
+				}
+
+				// Scrittura del dato nel buffer InfluxDB
+				client.WritePoints(&payload)
+
+				// Commit dell'offset su Kafka
+				if err := reader.CommitMessages(commitCtx, msg); err != nil {
+					log.Printf("[Sink Error] Errore commit offset data: %v", err)
+				} else {
+					log.Printf("[DEBUG] Scritto punto per macchinario: %s, sensore: %s", payload.MachineID, payload.SensorID)
+				}
+				return
+			}
+
+			// Commit di fallback per eventuali eventi non riconosciuti
+			_ = reader.CommitMessages(commitCtx, msg)
+		}()
 	}
 
 	// --- Operazioni di Chiusura e Cleanup ---
@@ -126,7 +168,7 @@ func main() {
 	}
 
 	log.Println("[Sink-Service] Esecuzione Flush e chiusura InfluxDB Client...")
-	client.Close() // Garantisce che tutto ciò che è in memoria venga salvato sul DB prima di uscire
+	client.Close() // Flush del buffer in memoria e chiusura della connessione
 
 	log.Println("[Sink-Service] Arrestato correttamente.")
 }

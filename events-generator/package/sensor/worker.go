@@ -129,8 +129,19 @@ func temperatureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopC
 				continue
 			}
 
+			msg := config.MessageStreamEvent{
+				Type:    "DATA",
+				Payload: jsonBytes,
+			}
+
+			jsonBytesMsg, err := json.Marshal(msg)
+			if err != nil {
+				log.Printf("[%s] Errore serializzazione JSON: %v", cfg.SensorID, err)
+				continue
+			}
+
 			kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytesMsg})
 			cancel()
 
 			if err != nil {
@@ -247,8 +258,19 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 				continue
 			}
 
+			msg := config.MessageStreamEvent{
+				Type:    "DATA",
+				Payload: jsonBytes,
+			}
+
+			jsonBytesMsg, err := json.Marshal(msg)
+			if err != nil {
+				log.Printf("[%s] Errore serializzazione JSON: %v", cfg.SensorID, err)
+				continue
+			}
+
 			kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytes})
+			err = kafkaWriter.WriteMessages(kCtx, kafka.Message{Key: []byte(cfg.SensorID), Value: jsonBytesMsg})
 			cancel()
 
 			if err != nil {

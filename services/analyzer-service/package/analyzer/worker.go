@@ -57,9 +57,12 @@ func SensorWorker(ctx context.Context, sensorID string, channels *model.SensorCh
 
 func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, checkpoint func()) {
 
-	windowDuration := 60 * time.Second // Finestra di osservazione più stretta
-	slideInterval := 30 * time.Second  // Ricalcola e pubblica ogni 2 SECONDI
-	watermarkDelay := 15 * time.Second // Tolleranza ritardi ridotta a 5s
+	//	Configurazioni temporali della Finestra sliding
+	const (
+		windowDuration = 60 * time.Second // Finestra di osservazione più stretta
+		slideInterval  = 30 * time.Second // Ricalcola e pubblica ogni 2 SECONDI
+		watermarkDelay = 15 * time.Second // Tolleranza ritardi ridotta a 5s
+	)
 
 	defer activeWorkers.Delete(w.state.SensorID)
 
@@ -136,11 +139,12 @@ func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, check
 				w.state.LastEvaluation = w.state.MaxEventTime
 			}
 
+			machineID := w.state.MachineID
 			w.mu.Unlock()
 
 			// Processamento della finestra --> Calcolo delle metriche
 			if windowToProcess != nil {
-				go processWindow(w.writer, w.state.SensorID, w.state.MachineID, *windowToProcess, currentWatermark)
+				processWindow(w.writer, w.state.SensorID, machineID, *windowToProcess, currentWatermark)
 			}
 
 		case state := <-w.invalidDataChannel:
@@ -284,9 +288,21 @@ func processWindow(writer *kafka.Writer, sensorID, machineID string, w model.Sli
 		return
 	}
 
+	msg := model.MessageStreamEvent{
+		Type:    "DATA",
+		Payload: jsonBytes,
+	}
+
+	jsonBytesMsg, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("[%s] Errore serializzazione JSON: %v", sensorID, err)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	err = writer.WriteMessages(ctx, kafka.Message{
-		Value: jsonBytes,
+		Key:   []byte(sensorID),
+		Value: jsonBytesMsg,
 	})
 	cancel()
 

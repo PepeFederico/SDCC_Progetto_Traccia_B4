@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -51,6 +52,16 @@ type PressureReading struct {
 	MachineID string  `json:"machineId"`
 	Timestamp string  `json:"timestamp"`
 	Pressure  float64 `json:"pressure_bar"`
+}
+
+type MessageStreamEvent struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"` // Presente solo se Type == "DATA"
+	Marker  *LatencyMarker  `json:"marker,omitempty"`  // Presente solo se Type == "LATENCY_MARKER"
+}
+
+type LatencyMarker struct {
+	IngressTimestampNano int64 `json:"ingress_ts_nano"`
 }
 
 type EmergencyCommand struct {

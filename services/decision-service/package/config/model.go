@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ProcessedData struct {
 	MessageID    string  `json:"messageId"`
@@ -14,6 +17,16 @@ type ProcessedData struct {
 	Timestamp    string  `json:"timestamp"`
 	WindowStart  string  `json:"windowStart"`
 	WindowEnd    string  `json:"windowEnd"`
+}
+
+type MessageStreamEvent struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"` // Presente solo se Type == "DATA"
+	Marker  *LatencyMarker  `json:"marker,omitempty"`  // Presente solo se Type == "LATENCY_MARKER"
+}
+
+type LatencyMarker struct {
+	IngressTimestampNano int64 `json:"ingress_ts_nano"`
 }
 
 type SensorConfig struct {

@@ -72,6 +72,53 @@ func StartSensor(ctx context.Context, cfg config.SensorConfig, stopChan <-chan s
 	return modeChannel
 }
 
+func StartLatencyMarkerEmitter(ctx context.Context, writer *kafka.Writer, topics []string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+
+	go func() {
+		defer ticker.Stop()
+		log.Printf("[LATENCY EMITTER] Avviato con successo per i topic: %v", topics)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("[LATENCY EMITTER] Arresto richiesto dal context.")
+				return
+
+			case <-ticker.C:
+				markerMsg := config.MessageStreamEvent{
+					Type: "LATENCY_MARKER",
+					Marker: &config.LatencyMarker{
+						IngressTimestampNano: time.Now().UnixNano(),
+					},
+				}
+
+				bytes, err := json.Marshal(markerMsg)
+				if err != nil {
+					log.Printf("[LATENCY EMITTER] Errore marshalling marker: %v", err)
+					continue
+				}
+
+				// Invio del marker su CIASCUN topic di categoria Kafka
+				for _, topic := range topics {
+					kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+
+					err := writer.WriteMessages(kCtx, kafka.Message{
+						Topic: topic, // Assegnazione dinamica del topic di destinazione
+						Key:   []byte("LATENCY_MARKER"),
+						Value: bytes,
+					})
+					cancel()
+
+					if err != nil {
+						log.Printf("[LATENCY EMITTER] Errore invio marker sul topic %s: %v", topic, err)
+					}
+				}
+			}
+		}
+	}()
+}
+
 func SendControlCommand(machineID string, cmd config.StateCommand) bool {
 	if ch, ok := machineRegistry.Load(machineID); ok {
 		log.Printf("[DEBUG MANAGER] Inoltro comando %+v al sensore %s", cmd, machineID)

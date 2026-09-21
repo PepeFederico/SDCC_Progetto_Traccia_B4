@@ -28,7 +28,7 @@ var lastMessagePerPartition sync.Map
 
 // Definizione Mappa[key: SensorID, Value: Stato Sensore] --> Mappa temporanea contenente gli stati ripristinati
 var recoveredStates map[string]model.SensorState
-
+var recoveredMutex sync.Mutex
 var CheckpointTriggerChan = make(chan struct{}, 1)
 
 func RequestCheckpoint() {
@@ -47,8 +47,8 @@ func main() {
 	}
 
 	//		DEFINIZIONE TOPIC DEI DATI PROCESSATI
-	topic := "processed-data-topic"
-	processedData := pkgKafka.NewWriterKafka(broker, topic)
+	topic := "processed-data-topic"                         //	Topic Ingresso
+	processedData := pkgKafka.NewWriterKafka(broker, topic) //	Topic Uscita
 
 	reader := pkgKafka.NewKafkaConsumer(broker)
 	defer func() {
@@ -100,14 +100,12 @@ func main() {
 
 	//	-----	4°Passo:	AVVIO GOROUTNE PER LA GESTIONE DEL CHECKPOINT DELLE FINESTRE	-----
 	go startCheckpointTicker(ctx, reader, conn)
-
-	log.Println("Analyzer Service attivo sul topic 'data-topic-cleaned'")
-
 	//	-----	5°Passo:	AVVIO GOROUTINE PER LA GESTIONE DEI SEGNALI DA REDIS PUB/SUB. GESTIONE STATO STOPPED DEI SENSORI	-----
 	go performStoppedStateSensor(ctx, conn)
 
+	log.Println("Analyzer Service attivo sul topic 'data-topic-cleaned'")
+
 	for {
-		// Usiamo FetchMessage per gestire manualmente il commit
 		msg, err := reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -117,41 +115,64 @@ func main() {
 			continue
 		}
 
-		//	Salviamo l'ultimo messaggio visto la specifica Partizione del Topic Kafka
 		lastMessagePerPartition.Store(msg.Partition, msg)
 
-		var t model.GenericTelemetry
-		if err := json.Unmarshal(msg.Value, &t); err != nil {
-			log.Printf("Errore unmarshal (messaggio scartato): %v", err)
+		var event model.MessageStreamEvent
+		if err := json.Unmarshal(msg.Value, &event); err != nil {
+			log.Printf("Errore unmarshal MessageStreamEvent: %v", err)
 			continue
 		}
 
-		parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
-		if err != nil {
-			// Fallback in caso di timestamp vuoto o malformato
-			parsedTime = time.Now().UTC()
-		}
-
-		var item model.Item
-		var valore float64
-
-		if t.TemperatureCelsius != 0 {
-			valore = t.TemperatureCelsius
-		} else if t.PressureBar != 0 {
-			valore = t.PressureBar
-		} else {
+		// -----------------------------------------------------------------
+		// CASO A: Gestione del LATENCY_MARKER
+		// -----------------------------------------------------------------
+		if event.Type == "LATENCY_MARKER" && event.Marker != nil {
+			err := processedData.WriteMessages(ctx, kafka.Message{
+				Key:   msg.Key,
+				Value: msg.Value,
+			})
+			if err != nil {
+				log.Printf("Errore inoltro LATENCY_MARKER: %v", err)
+			}
 			continue
 		}
 
-		item = model.Item{
-			SensorID:  t.SensorID,
-			MachineID: t.MachineID,
-			Timestamp: parsedTime,
-			Value:     valore,
-		}
+		// -----------------------------------------------------------------
+		// CASO B: Gestione del DATO SENSORIALE (DATA)
+		// -----------------------------------------------------------------
+		if event.Type == "DATA" && len(event.Payload) > 0 {
+			var t model.GenericTelemetry
+			if err := json.Unmarshal(event.Payload, &t); err != nil {
+				log.Printf("Errore unmarshal payload telemetry: %v", err)
+				continue
+			}
 
-		// Inoltra l'item al worker dedicato del sensore
-		AddNItem(ctx, item, processedData, conn)
+			sensorID := t.SensorID
+			if sensorID == "" {
+				sensorID = string(msg.Key)
+			}
+
+			parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
+			if err != nil {
+				parsedTime = time.Now().UTC()
+			}
+
+			var valore float64
+			if t.TemperatureCelsius != 0 {
+				valore = t.TemperatureCelsius
+			} else {
+				valore = t.PressureBar
+			}
+
+			item := model.Item{
+				SensorID:  sensorID,
+				MachineID: t.MachineID,
+				Timestamp: parsedTime,
+				Value:     valore,
+			}
+
+			AddNItem(ctx, item, processedData, conn)
+		}
 
 	}
 }
@@ -168,10 +189,13 @@ func AddNItem(ctx context.Context, item model.Item, writer *kafka.Writer, conn *
 
 	if !loader {
 		var initialState *model.SensorState
+		//	Mutex per evitare Race Condition / Panic su recoveredStates
+		recoveredMutex.Lock()
 		if state, ok := recoveredStates[item.SensorID]; ok {
 			initialState = &state
 			delete(recoveredStates, item.SensorID)
 		}
+		recoveredMutex.Unlock()
 
 		go analyzer.SensorWorker(ctx, item.SensorID, channel, initialState, writer, conn, RequestCheckpoint)
 	}

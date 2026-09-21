@@ -14,12 +14,22 @@ import (
 )
 
 type GenericTelemetry struct {
-	MessageID          string  `json:"messageId"`
-	SensorID           string  `json:"sensorId"`
-	MachineID          string  `json:"machineId"`
-	Timestamp          string  `json:"timestamp"`
-	TemperatureCelsius float64 `json:"temperature_celsius,omitempty"`
-	PressureBar        float64 `json:"pressure_bar,omitempty"`
+	MessageID          string   `json:"messageId"`
+	SensorID           string   `json:"sensorId"`
+	MachineID          string   `json:"machineId"`
+	Timestamp          string   `json:"timestamp"`
+	TemperatureCelsius *float64 `json:"temperature_celsius,omitempty"` //	Gestione del caso 0.0
+	PressureBar        *float64 `json:"pressure_bar,omitempty"`        //	Gestione del caso 0.0
+}
+
+type MessageStreamEvent struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"` // Presente solo se Type == "DATA"
+	Marker  *LatencyMarker  `json:"marker,omitempty"`  // Presente solo se Type == "LATENCY_MARKER"
+}
+
+type LatencyMarker struct {
+	IngressTimestampNano int64 `json:"ingress_ts_nano"`
 }
 
 func main() {
@@ -53,7 +63,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Gestione Shutdown
+	// Gestione Signal Shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -62,53 +72,97 @@ func main() {
 		cancel()
 	}()
 
-	log.Println("Writer Service attivo su topic 'data-topic-cleaned'...")
+	log.Println("Write Service attivo su topic Kafka 'data-topic-cleaned'...")
 
 	for {
-		// Usiamo FetchMessage per gestire manualmente il commit
 		msg, err := reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
+				// Context cancellato: arresto pulito
 				break
 			}
 			log.Printf("Errore lettura Kafka: %v", err)
 			continue
 		}
 
-		var t GenericTelemetry
-		if err := json.Unmarshal(msg.Value, &t); err != nil {
-			log.Printf("Errore unmarshal (messaggio scartato): %v", err)
-			_ = reader.CommitMessages(ctx, msg)
-			continue
-		}
+		// Closure per garantire il rilascio immediato del commitCtx a ogni iterazione
+		func() {
+			commitCtx, commitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer commitCancel()
 
-		var metricType string
-		var val float64
-		if t.TemperatureCelsius != 0 {
-			metricType = "temperature"
-			val = t.TemperatureCelsius
-		} else if t.PressureBar != 0 {
-			metricType = "pressure"
-			val = t.PressureBar
-		}
+			// 1. Decodifica dell'involucro dell'evento
+			var event MessageStreamEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("Errore unmarshal MessageStreamEvent (messaggio scartato): %v", err)
+				_ = reader.CommitMessages(commitCtx, msg)
+				return
+			}
 
-		parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
-		if err != nil {
-			// Fallback in caso di timestamp vuoto o malformato
-			parsedTime = time.Now().UTC()
-		}
+			// --- CASO A: LATENCY_MARKER ---
+			if event.Type == "LATENCY_MARKER" && event.Marker != nil {
+				nowNano := time.Now().UnixNano()
+				totalLatencyMs := float64(nowNano-event.Marker.IngressTimestampNano) / 1e6
 
-		// Scrittura asincrona su InfluxDB
-		writer.WritePoints(t.MachineID, t.SensorID, metricType, val, parsedTime)
+				log.Printf("[LATENCY RAW-PIPELINE] Latenza Totale a InfluxDB (Raw Data): %.2f ms", totalLatencyMs)
 
-		// Commit manuale dell'offset dopo l'elaborazione
-		if err := reader.CommitMessages(ctx, msg); err != nil {
-			log.Printf("Errore commit offset Kafka: %v", err)
-		}
+				if err := reader.CommitMessages(commitCtx, msg); err != nil {
+					log.Printf("Errore commit offset marker: %v", err)
+				}
+				return
+			}
 
-		log.Printf("[DEBUG]: scritto messaggio %s\n", msg.Value)
+			// --- CASO B: DATA ---
+			if event.Type == "DATA" && len(event.Payload) > 0 {
+				var t GenericTelemetry
+				if err := json.Unmarshal(event.Payload, &t); err != nil {
+					log.Printf("Errore unmarshal GenericTelemetry (payload scartato): %v", err)
+					_ = reader.CommitMessages(commitCtx, msg)
+					return
+				}
+
+				// Fallback sulla Key di Kafka se SensorID nel payload JSON è vuoto
+				sensorID := t.SensorID
+				if sensorID == "" {
+					sensorID = string(msg.Key)
+				}
+
+				// Determinazione del tipo di metrica e valore
+				var metricType string
+				var val float64
+
+				if t.TemperatureCelsius != nil {
+					metricType = "temperature"
+					val = *t.TemperatureCelsius
+				} else if t.PressureBar != nil {
+					metricType = "pressure"
+					val = *t.PressureBar
+				} else {
+					log.Printf("Messaggio ignorato: nessun valore valido per sensor %s", sensorID)
+					_ = reader.CommitMessages(commitCtx, msg)
+					return
+				}
+
+				parsedTime, err := time.Parse(time.RFC3339, t.Timestamp)
+				if err != nil {
+					parsedTime = time.Now().UTC()
+				}
+
+				// Scrittura asincrona su InfluxDB
+				writer.WritePoints(t.MachineID, sensorID, metricType, val, parsedTime)
+
+				// Commit manuale dell'offset
+				if err := reader.CommitMessages(commitCtx, msg); err != nil {
+					log.Printf("Errore commit offset Kafka: %v", err)
+				} else {
+					log.Printf("[DEBUG] Scritta metrica '%s' per macchina: %s, sensore: %s", metricType, t.MachineID, sensorID)
+				}
+				return
+			}
+
+			// Fallback per eventi con tipo sconosciuto
+			_ = reader.CommitMessages(commitCtx, msg)
+		}()
 	}
 
-	log.Println("Writer Service arrestato correttamente.")
-
+	log.Println("Write Service arrestato correttamente.")
 }

@@ -3,7 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"ingestion-service/package/config"
 	"log"
 	"time"
 
@@ -11,18 +11,17 @@ import (
 )
 
 func newKafkaProducer(broker, topic string) *kafka.Writer {
-	kafkaProducer := kafka.Writer{
+	return &kafka.Writer{
 		Addr:     kafka.TCP(broker),
 		Topic:    topic,
-		Balancer: &kafka.LeastBytes{},
+		Balancer: &kafka.Hash{}, // Hash garantisce che i messaggi dello stesso sensore finiscano nella stessa partizione
 	}
-	return &kafkaProducer
 }
 
-func writeToKafka(payload any, writer *kafka.Writer) error {
-	jsonBytes, err := json.Marshal(payload)
+func writeEventToKafka(sensorID string, event config.MessageStreamEvent, writer *kafka.Writer) error {
+	jsonBytes, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("Errore serializzazione JSON: %v", err)
+		log.Printf("Errore serializzazione MessageStreamEvent JSON: %v", err)
 		return err
 	}
 
@@ -30,6 +29,7 @@ func writeToKafka(payload any, writer *kafka.Writer) error {
 	defer cancel()
 
 	err = writer.WriteMessages(ctx, kafka.Message{
+		Key:   []byte(sensorID),
 		Value: jsonBytes,
 	})
 
@@ -38,6 +38,5 @@ func writeToKafka(payload any, writer *kafka.Writer) error {
 		return err
 	}
 
-	fmt.Printf("Messaggio pulito inoltrato: %s\n", string(jsonBytes))
 	return nil
 }

@@ -11,6 +11,7 @@
         <function importPath="github.com/segmentio/kafka-go" name="NewWriter" />
         <function importPath="github.com/redis/go-redis" name="NewClient" />
         <function importPath="analyzer-service/package/kafka" name="NewWriterKafka" />
+        <function importPath="progettoSDCC/events-generator/package/kafka" name="NewWriterLatencyMarker" />
       </functions>
     </inspection_tool>
     <inspection_tool class="HtmlUnknownTag" enabled="true" level="WARNING" enabled_by_default="true">

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -11,6 +12,16 @@ type GenericTelemetry struct {
 	Timestamp          string  `json:"timestamp"`
 	TemperatureCelsius float64 `json:"temperature_celsius,omitempty"`
 	PressureBar        float64 `json:"pressure_bar,omitempty"`
+}
+
+type MessageStreamEvent struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"` // Presente solo se Type == "DATA"
+	Marker  *LatencyMarker  `json:"marker,omitempty"`  // Presente solo se Type == "LATENCY_MARKER"
+}
+
+type LatencyMarker struct {
+	IngressTimestampNano int64 `json:"ingress_ts_nano"`
 }
 
 type RedisParameter struct {

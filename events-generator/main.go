@@ -56,6 +56,8 @@ func (server *GeneratorServer) InsertNewSensor(_ context.Context, req *generator
 		sensor.StartSensor(server.ctx, cfg, server.stopChan, server.temperatureWriter, server.redisClient)
 	case "PressureSensor":
 		sensor.StartSensor(server.ctx, cfg, server.stopChan, server.pressureWriter, server.redisClient)
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "Tipo sensore non supportato: %s", cfg.Type)
 	}
 
 	return &generatorpb.Response{
@@ -120,6 +122,7 @@ func main() {
 	// Inizializzazione Client Kafka
 	temperatureWriter := pkgKafka.NewWriter(broker, topicsKafka[0])
 	pressureWriter := pkgKafka.NewWriter(broker, topicsKafka[1])
+	latencyWriter := pkgKafka.NewWriterLatencyMarker(broker)
 	signalWriter := pkgKafka.NewWriter(broker, signalTopic)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -316,6 +319,9 @@ func main() {
 		}
 	}
 
+	// Avvio dello emitter (es. invio di un marker ogni 500 ms)
+	sensor.StartLatencyMarkerEmitter(ctx, latencyWriter, topicsKafka, 500*time.Millisecond)
+
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("Impossibile mettersi in ascolto sulla porta gRPC 50051: %v", err)
@@ -355,6 +361,7 @@ func main() {
 	_ = temperatureWriter.Close()
 	_ = pressureWriter.Close()
 	_ = signalWriter.Close()
+	_ = latencyWriter.Close()
 
 	fmt.Println("Generatore di eventi arrestato correttamente.")
 }

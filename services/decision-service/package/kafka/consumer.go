@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
@@ -24,14 +25,13 @@ func StartDecisionConsumer(ctx context.Context, broker, readerTopic, writerTopic
 
 	writer := newKafkaProducer(broker, writerTopic)
 
-	//	Inizio Logica del Servizio
 	go func() {
 		defer func() {
 			_ = reader.Close()
 			_ = writer.Close()
 		}()
 
-		fmt.Printf("Consumer Attivo sul topic '%s...\n", readerTopic)
+		fmt.Printf("Consumer Attivo sul topic '%s'...\n", readerTopic)
 
 		for {
 			msg, err := reader.FetchMessage(ctx)
@@ -43,45 +43,80 @@ func StartDecisionConsumer(ctx context.Context, broker, readerTopic, writerTopic
 				continue
 			}
 
-			var message config.ProcessedData
-			if err = json.Unmarshal(msg.Value, &message); err != nil {
-				log.Printf("Errore unmarshal (messaggio scartato): %v", err)
+			var event config.MessageStreamEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("Errore unmarshal MessageStreamEvent (messaggio scartato): %v", err)
 				_ = reader.CommitMessages(ctx, msg)
 				continue
 			}
 
-			// 	Caricamento parametri dal DB Redis
-			sensorCfg, err := storage.LoadParameterSensor(ctx, message.SensorID, conn)
-			if err != nil {
-				log.Printf("[DECISION WARNING] Parametri non trovati su Redis per %s: %v. Scarto evento.", message.SensorID, err)
-				_ = reader.CommitMessages(ctx, msg)
+			// -----------------------------------------------------------------
+			// CASO A: Gestione del LATENCY_MARKER
+			// -----------------------------------------------------------------
+			if event.Type == "LATENCY_MARKER" && event.Marker != nil {
+				nowNano := time.Now().UnixNano()
+				totalLatencyMs := float64(nowNano-event.Marker.IngressTimestampNano) / 1e6
+
+				log.Printf("[LATENCY E2E] Latenza Totale Pipeline: %.2f ms", totalLatencyMs)
+
+				// FIX: Commit fondamentale anche per i marker
+				if err := reader.CommitMessages(ctx, msg); err != nil {
+					log.Printf("[DECISION ERROR] Errore commit offset marker: %v", err)
+				}
 				continue
 			}
 
-			// 		Valutazione delle Regole di Decisione
-			shouldStop, reason := evaluateAnomalies(message, sensorCfg)
-
-			// 		Invio eventuale Segnale di Emergenza
-			if shouldStop {
-				log.Printf("[DECISION ALARM] Anomalia rilevata sul sensore %s! Motivo: %s", message.SensorID, reason)
-
-				cmd := config.AlarmMessage{
-					SensorID: message.SensorID,
-					Command:  config.ModeStop,
+			// -----------------------------------------------------------------
+			// CASO B: Gestione del DATO SENSORIALE (DATA)
+			// -----------------------------------------------------------------
+			if event.Type == "DATA" && len(event.Payload) > 0 {
+				var message config.ProcessedData
+				if err = json.Unmarshal(event.Payload, &message); err != nil {
+					log.Printf("Errore unmarshal payload ProcessedData (messaggio scartato): %v", err)
+					_ = reader.CommitMessages(ctx, msg)
+					continue
 				}
 
-				if err := writeToKafka(message.SensorID, cmd, writer); err != nil {
-					log.Printf("[DECISION ALARM] Errore invio allarme Kafka: %v", err)
+				// Fallback sulla Key di Kafka se SensorID è vuoto nel payload
+				sensorID := message.SensorID
+				if sensorID == "" {
+					sensorID = string(msg.Key)
 				}
+
+				sensorCfg, err := storage.LoadParameterSensor(ctx, sensorID, conn)
+				if err != nil {
+					log.Printf("[DECISION WARNING] Parametri non trovati su Redis per %s: %v. Scarto evento.", sensorID, err)
+					_ = reader.CommitMessages(ctx, msg)
+					continue
+				}
+
+				// Valutazione delle Regole di Decisione
+				shouldStop, reason := evaluateAnomalies(message, sensorCfg)
+
+				if shouldStop {
+					log.Printf("[DECISION ALARM] Anomalia rilevata sul sensore %s! Motivo: %s", sensorID, reason)
+
+					cmd := config.AlarmMessage{
+						SensorID: sensorID,
+						Command:  config.ModeStop,
+					}
+
+					if err := writeToKafka(sensorID, cmd, writer); err != nil {
+						log.Printf("[DECISION ALARM] Errore invio allarme Kafka: %v", err)
+					}
+				}
+
+				// Commit finale dell'offset processato
+				if err := reader.CommitMessages(ctx, msg); err != nil {
+					log.Printf("[DECISION ERROR] Errore commit offset Kafka: %v", err)
+				}
+				continue
 			}
 
-			// 		Commit finale dell'offset processato
-			if err := reader.CommitMessages(ctx, msg); err != nil {
-				log.Printf("[DECISION ERROR] Errore commit offset Kafka: %v", err)
-			}
+			// 	Commit per eventuali tipi di evento non gestiti
+			_ = reader.CommitMessages(ctx, msg)
 		}
 	}()
-
 }
 
 // Funzione ausiliaria pura per valutare la presenza di anomalie
