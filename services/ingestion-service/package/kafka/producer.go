@@ -12,9 +12,12 @@ import (
 
 func newKafkaProducer(broker, topic string) *kafka.Writer {
 	return &kafka.Writer{
-		Addr:     kafka.TCP(broker),
-		Topic:    topic,
-		Balancer: &kafka.Hash{}, // Hash garantisce che i messaggi dello stesso sensore finiscano nella stessa partizione
+		Addr:         kafka.TCP(broker),
+		Topic:        topic,
+		Balancer:     &kafka.Hash{},
+		BatchSize:    100,                   // Invia quando accumula 100 messaggi
+		BatchTimeout: 50 * time.Millisecond, // Oppure invia ogni 10ms
+		Async:        true,                  // Scrittura non bloccante per la goroutine chiamante
 	}
 }
 
