@@ -347,5 +347,11 @@ func publishToDashboard(cfg config.SensorConfig, state string, conn *redis.Clien
 		log.Printf("Error marshalling dashboardInfo : %v", err)
 	}
 
+	// 1. Salva lo stato nell'Hash Set globale che l'SSE legge al boot (BUG 1 FIX)
+	err = conn.HSet(ctx, "sensors:current_status", cfg.SensorID, string(jsonBytes)).Err()
+	if err != nil {
+		log.Printf("[%s] Errore aggiornamento HSet sensors:current_status: %v", cfg.SensorID, err)
+	}
+
 	conn.Publish(ctx, "sensor:status", string(jsonBytes))
 }

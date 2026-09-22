@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	metrics "progettoSDCC/prometheus"
+
 	model "decision-service/package/config"
 	"decision-service/package/storage"
 
@@ -36,6 +38,10 @@ func main() {
 		DefaultDB: 0,
 	}
 
+	//	Initialization e avvio servizio Prometheus
+	metriche := metrics.NewMetricsFactory("decision_service")
+	metrics.StartMetricsServer(":2112")
+
 	conn, err := storage.NewRedisWriter(parametersRedis)
 	if err != nil {
 		log.Fatal(err)
@@ -50,7 +56,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pkgKafka.StartDecisionConsumer(ctx, broker, readerTopic, writerTopic, "decision-consumer", conn)
+	pkgKafka.StartDecisionConsumer(ctx, broker, readerTopic, writerTopic, "decision-consumer", conn, metriche)
 
 	// Shutdown pulito
 	sigChan := make(chan os.Signal, 1)

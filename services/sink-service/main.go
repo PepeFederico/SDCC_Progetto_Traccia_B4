@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	metrichePrometheus "progettoSDCC/prometheus"
 	"syscall"
 	"time"
 
@@ -56,6 +57,10 @@ func main() {
 
 	// --- Inizializzazione Server gRPC ---
 	grpcServer := StartGRPCServer(grpcPort, client)
+
+	//	--- Inizializzazione scraping da Prometheus ---
+	metriche := metrichePrometheus.NewMetricsFactory("sink_service")
+	metrichePrometheus.StartMetricsServer(":2112")
 
 	// --- Gestione Signal Shutdown ---
 	sigChan := make(chan os.Signal, 1)
@@ -106,6 +111,12 @@ func main() {
 
 				log.Printf("[LATENCY E2E] Latenza Totale Pipeline: %.2f ms", totalLatencyMs)
 
+				// 1. Misura Latenza End-to-End su Prometheus (convertita in secondi)
+				metriche.E2ELatencyHistogram.Observe(totalLatencyMs / 1000.0)
+
+				// 2. Incrementa Throughput Marker
+				metriche.ProcessedEventsTotal.WithLabelValues("LATENCY_MARKER", "success").Inc()
+
 				if err := reader.CommitMessages(commitCtx, msg); err != nil {
 					log.Printf("[Sink Error] Errore commit offset marker: %v", err)
 				}
@@ -119,6 +130,7 @@ func main() {
 				var t storage.ProcessedData
 				if err := json.Unmarshal(event.Payload, &t); err != nil {
 					log.Printf("[Sink Error] Errore unmarshal ProcessedData (scarto): %v", err)
+					metriche.ProcessedEventsTotal.WithLabelValues("DATA", "error").Inc()
 					_ = reader.CommitMessages(commitCtx, msg)
 					return
 				}
@@ -132,6 +144,14 @@ func main() {
 				if err != nil {
 					parsedTime = time.Now().UTC()
 				}
+
+				// --- 1. Calcolo del Processing Lag (Backpressure) ---
+				// Misura la differenza tra l'istante attuale e il timestamp generato/elaborato nel dato
+				lagSeconds := time.Since(parsedTime).Seconds()
+				if lagSeconds < 0 {
+					lagSeconds = 0 // Previene lag negativi dovuti a disallineamenti di clock
+				}
+				metriche.ProcessingLagGauge.WithLabelValues(sensorID).Set(lagSeconds)
 
 				payload := storage.DataPoint{
 					SensorID:     sensorID,
@@ -150,8 +170,12 @@ func main() {
 				// Commit dell'offset su Kafka
 				if err := reader.CommitMessages(commitCtx, msg); err != nil {
 					log.Printf("[Sink Error] Errore commit offset data: %v", err)
+					// --- 2. Incremento Throughput (Fallimento/Errore Commit) ---
+					metriche.ProcessedEventsTotal.WithLabelValues("DATA", "commit_error").Inc()
 				} else {
 					log.Printf("[DEBUG] Scritto punto per macchinario: %s, sensore: %s", payload.MachineID, payload.SensorID)
+					// --- 3. Incremento Throughput (Successo) ---
+					metriche.ProcessedEventsTotal.WithLabelValues("DATA", "success").Inc()
 				}
 				return
 			}

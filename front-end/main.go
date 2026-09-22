@@ -178,9 +178,15 @@ func (gw *Gateway) handleStreamSensor(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Flush()
 
+	reqCtx := c.Request.Context()
+	clientID := fmt.Sprintf("Client-%d", time.Now().UnixNano()%10000)
+	log.Printf("[DEBUG-GW] [%s] Nuova connessione SSE avviata", clientID)
+
 	// A. INVIA SUBITO LO STATO INIZIALE DI TUTTI I SENSORI SALVATI IN REDIS
-	savedSensors, err := gw.connRedis.HGetAll(c.Request.Context(), "sensors:current_status").Result()
-	if err == nil && len(savedSensors) > 0 {
+	savedSensors, err := gw.connRedis.HGetAll(reqCtx, "sensors:current_status").Result()
+	if err != nil {
+		log.Printf("[ERROR-GW] [%s] Errore recupero HGetAll sensors:current_status: %v", clientID, err)
+	} else {
 		for _, sensorJSON := range savedSensors {
 			c.SSEvent("sensor_data", sensorJSON)
 		}
@@ -188,22 +194,29 @@ func (gw *Gateway) handleStreamSensor(c *gin.Context) {
 	}
 
 	// B. SOTTOSCRIZIONE PUB/SUB PER CAMBIAMENTI FUTURI IN REAL-TIME
-	pubSub := gw.connRedis.Subscribe(context.Background(), "sensor:status")
-	defer pubSub.Close()
+	pubSub := gw.connRedis.Subscribe(reqCtx, "sensor:status")
+	defer func(pubSub *redis.PubSub) {
+		log.Printf("[DEBUG-GW] [%s] Chiusura sottoscrizione Pub/Sub Redis", clientID)
+		_ = pubSub.Close()
+	}(pubSub)
 
 	ch := pubSub.Channel()
 
 	for {
 		select {
-		case <-c.Request.Context().Done():
+		case <-reqCtx.Done():
+			log.Printf("[DEBUG-GW] [%s] Connessione SSE chiusa dal client HTTP/Browser", clientID)
 			return
 
 		case msg, ok := <-ch:
 			if !ok {
+				log.Printf("[ERROR-GW] [%s] Canale Pub/Sub Redis chiuso inaspettatamente", clientID)
 				return
 			}
+			log.Printf("[DEBUG-GW] [%s] Messaggio ricevuto da Redis Pub/Sub: %s", clientID, msg.Payload)
 			c.SSEvent("sensor_data", msg.Payload)
 			c.Writer.Flush()
+			log.Printf("[DEBUG-GW] [%s] Evento SSE 'sensor_data' inviato con successo al browser", clientID)
 		}
 	}
 }

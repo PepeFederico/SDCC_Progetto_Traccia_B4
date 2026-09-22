@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 2s
+
+scrape_configs:
+  - job_name: 'decision-service'
+    dns_sd_configs:
+      - names:
+          - 'decision-service'
+        type: 'A'
+        port: 2112
+
+  - job_name: 'sink-service'
+    dns_sd_configs:
+      - names:
+          - 'sink-service'
+        type: 'A'
+        port: 2112
