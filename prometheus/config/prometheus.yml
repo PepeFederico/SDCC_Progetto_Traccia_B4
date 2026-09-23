@@ -1,7 +1,10 @@
 global:
-  scrape_interval: 2s
+  scrape_interval: 5s
 
 scrape_configs:
+  # -----------------------------------------------------------------
+  # Decision Service (Discovery dinamica per scaling)
+  # -----------------------------------------------------------------
   - job_name: 'decision-service'
     dns_sd_configs:
       - names:
@@ -9,9 +12,26 @@ scrape_configs:
         type: 'A'
         port: 2112
 
+  # -----------------------------------------------------------------
+  # Sink Service (Discovery dinamica per scaling)
+  # -----------------------------------------------------------------
   - job_name: 'sink-service'
     dns_sd_configs:
       - names:
           - 'sink-service'
         type: 'A'
         port: 2112
+
+  # -----------------------------------------------------------------
+  # cAdvisor (Metriche Hardware/Container CPU & RAM)
+  # -----------------------------------------------------------------
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # -----------------------------------------------------------------
+  # Kafka Exporter (Metriche Lag Consumer Group)
+  # -----------------------------------------------------------------
+  - job_name: 'kafka-exporter'
+    static_configs:
+      - targets: ['kafka-exporter:9308']

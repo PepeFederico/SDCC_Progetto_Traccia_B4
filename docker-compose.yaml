@@ -211,7 +211,7 @@ services:
       dockerfile: services/decision-service/Dockerfile
     #container_name: decision_service
     restart: unless-stopped
-    ports:
+    expose:
       - "2112"
     environment:
       - KAFKA_BROKER=kafka:9096
@@ -234,8 +234,8 @@ services:
       dockerfile: ./services/sink-service/Dockerfile
     container_name: sink_service
     restart: unless-stopped
-    ports:
-      - "50052:50052"
+    expose:
+      - "50052"
       - "2112"
     environment:
       - KAFKA_BROKER=kafka:9096
@@ -298,6 +298,31 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - prometheus
+    networks:
+      - sdcc_progetto
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - sdcc_progetto
+
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command: [ "--kafka.server=kafka:9096" ]
+    ports:
+      - "9308:9308"
+    depends_on:
+      - init-kafka
     networks:
       - sdcc_progetto
 
