@@ -55,7 +55,7 @@ func StartSensor(ctx context.Context, cfg config.SensorConfig, stopChan <-chan s
 		log.Printf("Error marshalling dashboardInfo : %v", err)
 	}
 
-	// 1. SALVA LO STATO COMPLETO NELLA HASH (FONDAMENTALE per i nuovi client SSE!)
+	//	Salva lo stato completo nella Hash
 	conn.HSet(ctx, "sensors:current_status", cfg.SensorID, string(jsonBytes))
 
 	conn.Publish(ctx, "sensor:status", string(jsonBytes))
@@ -99,7 +99,7 @@ func StartLatencyMarkerEmitter(ctx context.Context, writer *kafka.Writer, topics
 					continue
 				}
 
-				// Invio del marker su CIASCUN topic di categoria Kafka
+				// Invio del marker su CIASCUN topic di categoria Kafka, poiché abbiamo due topic separati per tipologia di sensore: TemperatureSensor e PressureSensor
 				for _, topic := range topics {
 					kCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 

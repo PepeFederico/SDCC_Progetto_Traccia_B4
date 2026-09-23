@@ -163,7 +163,7 @@ async function refreshMetrics() {
         const res = await fetch('/api/monitoring/sensor');
         const data = await res.json();
 
-        // LOG DI DEBUG: Apri la console del browser (F12) per verificare la struttura esatta ricevuta!
+        // LOG DI DEBUG
         console.log("[DEBUG Metrics Data]:", data);
 
         const tbody = document.getElementById('metrics-table-body');
@@ -207,17 +207,17 @@ function formatNumber(val) {
 // --- INIZIALIZZAZIONE UNIFICATA ---
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Carica i dati iniziali dei form/selezioni
+    // Carica i dati iniziali dei form/selezioni
     if (typeof loadSensors === 'function') loadSensors();
     if (typeof loadSensorTypes === 'function') loadSensorTypes();
 
-    // 2. Registra l'evento di invio del form
+    // Registra l'evento di invio del form
     const form = document.getElementById('InsertNewSensor');
     if (form && typeof createNewSensor === 'function') {
         form.addEventListener('submit', createNewSensor);
     }
 
-    // 3. Ticker periodico in background per le metriche real-time
+    // Ticker periodico in background per le metriche real-time
     setInterval(() => {
         // Controlla se la tab è attiva sia tramite classe 'active' sia tramite visibilità CSS
         const monitoringTab = document.getElementById('tab-monitoring') || document.getElementById('monitoring');

@@ -180,7 +180,7 @@ func main() {
 func AddNItem(ctx context.Context, item model.Item, writer *kafka.Writer, conn *redis.Client) {
 	//	Definizione dei Canali
 	channels := &model.SensorChannels{
-		InputChannel:       make(chan model.Item, 500),
+		InputChannel:       make(chan model.Item, 1000),
 		InvalidDataChannel: make(chan string, 100),
 	}
 

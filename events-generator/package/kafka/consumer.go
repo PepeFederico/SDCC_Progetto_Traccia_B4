@@ -59,6 +59,7 @@ func StartEmergencyConsumer(ctx context.Context, broker, topic, groupID string) 
 
 					log.Printf("[WARNING] Tentativo %d/%d invio STOP fallito per sensore %s", attempt, maxRetries, cmd.SensorID)
 
+					//	Attendo il timer prima di eseguire un nuovo retry
 					select {
 					case <-ctx.Done():
 						return

@@ -220,7 +220,7 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 			whatWeDo := rand.Float64()
 
 			if whatWeDo < 0.01 {
-				// CASO 1 (3% delle volte): Dato Corrotto (es. NaN)
+				// CASO 1 (1% delle volte): Dato Corrotto (es. NaN)
 				payload = config.PressureReading{
 					MessageID: generateULID(),
 					SensorID:  cfg.SensorID,
@@ -230,7 +230,7 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 				}
 
 			} else if whatWeDo < 0.03 {
-				// CASO 2 (5% delle volte, cioè tra 0.03 e 0.08): Picco Fuori Scala (Outlier)
+				// CASO 2 (2% delle volte): Picco Fuori Scala (Outlier)
 				outlierPressure := currentMean + (noise * 5) // Moltiplichiamo il rumore per generare un picco
 
 				payload = config.PressureReading{
@@ -242,7 +242,7 @@ func pressureSensorWorker(ctx context.Context, cfg config.SensorConfig, stopChan
 				}
 
 			} else {
-				// CASO 3 (92% delle volte): Flusso Normale
+				// CASO 3 (97% delle volte): Flusso Normale
 				payload = config.PressureReading{
 					MessageID: generateULID(),
 					SensorID:  cfg.SensorID,
@@ -347,7 +347,7 @@ func publishToDashboard(cfg config.SensorConfig, state string, conn *redis.Clien
 		log.Printf("Error marshalling dashboardInfo : %v", err)
 	}
 
-	// 1. Salva lo stato nell'Hash Set globale che l'SSE legge al boot (BUG 1 FIX)
+	//	Salva lo stato nell'Hash Set globale che lo SSE legge al boot
 	err = conn.HSet(ctx, "sensors:current_status", cfg.SensorID, string(jsonBytes)).Err()
 	if err != nil {
 		log.Printf("[%s] Errore aggiornamento HSet sensors:current_status: %v", cfg.SensorID, err)

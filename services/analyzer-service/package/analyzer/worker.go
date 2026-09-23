@@ -59,9 +59,9 @@ func (w *WorkerInstance) run(ctx context.Context, redisConn *redis.Client, check
 
 	//	Configurazioni temporali della Finestra sliding
 	const (
-		windowDuration = 60 * time.Second // Finestra di osservazione più stretta
-		slideInterval  = 30 * time.Second // Ricalcola e pubblica ogni 2 SECONDI
-		watermarkDelay = 15 * time.Second // Tolleranza ritardi ridotta a 5s
+		windowDuration = 60 * time.Second // Finestra di osservazione
+		slideInterval  = 30 * time.Second // Ricalcola e pubblica ogni 30 SECONDI
+		watermarkDelay = 15 * time.Second // Tolleranza ritardi a 15s
 	)
 
 	defer activeWorkers.Delete(w.state.SensorID)

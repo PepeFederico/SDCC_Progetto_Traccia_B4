@@ -108,7 +108,7 @@ func main() {
 
 	//	Connessione al Client del Generatore
 	log.Printf("[API-Gateway] Connessione al servizio gRPC su: %s", grpcHost)
-	conn, err := grpc.Dial(grpcHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(grpcHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("Impossibile connettersi al Generatore gRPC: %v", err)
 	}
@@ -119,8 +119,8 @@ func main() {
 	}(conn)
 
 	//	Connessione al CLinet del Sink
-	log.Printf("[API-Gateway] Connessione al servizio gRPC su: %s", grpcHost)
-	connSink, err := grpc.Dial(grpcHostSink, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	log.Printf("[API-Gateway] Connessione al servizio gRPC su: %s", grpcHostSink)
+	connSink, err := grpc.NewClient(grpcHostSink, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("Impossibile connettersi al Generatore gRPC: %v", err)
 	}
@@ -228,7 +228,7 @@ func (gw *Gateway) handleCreateSensor(c *gin.Context) {
 		MachineToControl string  `json:"machineToControl"`
 		BaseMean         float64 `json:"baseMean"`
 		Variance         float64 `json:"variance"`
-		IntervalSec      int64   `json:"interval"` // Riceve i secondi dal form
+		IntervalSec      int64   `json:"interval"`
 		SogliaMinima     float64 `json:"soglia_minima"`
 		SogliaMassima    float64 `json:"soglia_massima"`
 		MaxStdDev        float64 `json:"max_std_dev"`
