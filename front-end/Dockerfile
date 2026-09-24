@@ -1,19 +1,18 @@
 # ==========================================
-# STAGE 1: Build dell'applicazione Go
+# STAGE 1: Build dell'applicazione
 # ==========================================
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# 1. Copia i file del modulo dalla root del progetto
-COPY go.mod go.sum ./
-RUN go mod download
-
-# 2. Copia tutto il codice sorgente
+# Copia l'intero progetto dalla root per soddisfare go.work
 COPY . .
 
-# 3. Compila il binario dell'API Gateway indicando la sotto-cartella
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o api-gateway ./front-end/main.go
+# Entra nella cartella del front-end
+WORKDIR /app/front-end
+
+# Compila l'eseguibile api-gateway
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o api-gateway .
 
 # ==========================================
 # STAGE 2: Immagine di runtime minimale
@@ -22,10 +21,10 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-# 1. Copia il binario compilato dallo STAGE 1
-COPY --from=builder /app/api-gateway .
+# Copia il binario compilato dallo STAGE 1
+COPY --from=builder /app/front-end/api-gateway .
 
-# 2. Copia la cartella web-page dal percorso corretto del builder
+# Copia la cartella web-page necessaria al front-end
 COPY --from=builder /app/front-end/web-page ./web-page
 
 EXPOSE 8080

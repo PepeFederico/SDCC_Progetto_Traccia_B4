@@ -2,9 +2,10 @@ go 1.25.0
 
 use (
 	.
+	./events-generator
 	./front-end
-	services/decision-service
 	services/analyzer-service
+	services/decision-service
 	services/ingestion-service
 	services/sink-service
 	services/write-service

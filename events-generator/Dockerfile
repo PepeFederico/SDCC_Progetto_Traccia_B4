@@ -5,15 +5,15 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copia i file di dipendenza Go
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copia tutto il codice sorgente
+# Copia l'intero contenuto della root nel container
+# In questo modo go.work troverà tutte le sottocartelle dei moduli
 COPY . .
 
-# Compila il binario dentro la cartella dove si trova main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o events-generator ./events-generator
+# Entra nella cartella del servizio
+WORKDIR /app/events-generator
+
+# Compila il binario (Go gestirà automaticamente le dipendenze via go.work)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o events-generator .
 
 # ==========================================
 # STAGE 2: Immagine di runtime minimale
@@ -22,7 +22,7 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-# Copia SOLO il binario (contiene già la web-page grazie a //go:embed)
-COPY --from=builder /app/events-generator .
+# Copia solo il binario compilato
+COPY --from=builder /app/events-generator/events-generator .
 
 CMD ["./events-generator"]

@@ -5,14 +5,13 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copia i file di dipendenza Go dalla radice del progetto
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copia tutto il codice sorgente del progetto
+# Copia tutto il progetto per soddisfare go.work e i moduli collegati
 COPY . .
 
-# Compila cercando il main.go nella directory corrente
+# Entra nella cartella specifica dell'ingestion-service
+WORKDIR /app/services/ingestion-service
+
+# Compila l'eseguibile
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o ingestion-service .
 
 # ==========================================
@@ -23,6 +22,6 @@ FROM alpine:latest
 WORKDIR /root/
 
 # Copia il binario compilato dallo STAGE 1
-COPY --from=builder /app/ingestion-service .
+COPY --from=builder /app/services/ingestion-service/ingestion-service .
 
 CMD ["./ingestion-service"]

@@ -5,12 +5,11 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copia i file di dipendenza per sfruttare la cache
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copia tutto il codice sorgente
+# Copia tutto il progetto per soddisfare go.work e i moduli collegati
 COPY . .
+
+# Entra nella cartella specifica di write-service
+WORKDIR /app/services/write-service
 
 # Compila l'eseguibile statico (CGO disabilitato)
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o write-service .
@@ -22,7 +21,7 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-# Copia il binario compilato
-COPY --from=builder /app/write-service .
+# Copia il binario compilato dallo STAGE 1
+COPY --from=builder /app/services/write-service/write-service .
 
 ENTRYPOINT ["./write-service"]

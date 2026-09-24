@@ -101,9 +101,8 @@ services:
   # ----------------------------
   ingestion-service:
     build:
-      context: ./services/ingestion-service
-      dockerfile: Dockerfile
-    #container_name: ingestion_service
+      context: .
+      dockerfile: ./services/ingestion-service/Dockerfile
     restart: unless-stopped
     environment:
       - KAFKA_BROKER=kafka:9096 # Usa la porta interna di Kafka
@@ -163,8 +162,8 @@ services:
   # ----------------------------
   write-service:
     build:
-      context: ./services/write-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/write-service/Dockerfile
     container_name: write_service
     restart: unless-stopped
     environment:
@@ -186,8 +185,8 @@ services:
   # ----------------------------
   analyzer-service:
     build:
-      context: ./services/analyzer-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/analyzer-service/Dockerfile
     #container_name: analyzer_service
     restart: unless-stopped
     environment:
@@ -208,7 +207,7 @@ services:
   decision-service:
     build:
       context: .
-      dockerfile: services/decision-service/Dockerfile
+      dockerfile: ./services/decision-service/Dockerfile
     #container_name: decision_service
     restart: unless-stopped
     expose:

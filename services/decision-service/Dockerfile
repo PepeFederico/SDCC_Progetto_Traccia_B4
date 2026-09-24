@@ -5,11 +5,13 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copia l'intero progetto per permettere la risoluzione delle dipendenze condivise (prometheus, kafka, ecc.)
+# Copia l'intero progetto per soddisfare go.work e le dipendenze condivise
 COPY . .
 
-# Compila posizionandoti nella cartella del singolo servizio
+# Entra nella cartella specifica del decision-service
 WORKDIR /app/services/decision-service
+
+# Compila l'eseguibile statico
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o decision-service .
 
 # ==========================================
@@ -19,7 +21,7 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-# Copia il binario compilato dallo stage builder
+# Copia il binario compilato dallo STAGE 1
 COPY --from=builder /app/services/decision-service/decision-service .
 
 EXPOSE 2112
