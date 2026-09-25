@@ -1,0 +1,277 @@
+# ==========================================
+# EVENTS-GENERATOR (Worker 1 - Load)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: events-generator
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: events-generator
+  template:
+    metadata:
+      labels:
+        app: events-generator
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: load
+      containers:
+        - name: events-generator
+          image: one00fp/event-generator:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 50051
+
+---
+# ==========================================
+# FRONT-END (API GATEWAY) (Master Node)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: front-end
+  template:
+    metadata:
+      labels:
+        app: front-end
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      containers:
+        - name: front-end
+          image: one00fp/api-gateway:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 8080
+
+---
+# ==========================================
+# INGESTION-SERVICE (Worker 2 - Core)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-service
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingestion-service
+  template:
+    metadata:
+      labels:
+        app: ingestion-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: core
+      containers:
+        - name: ingestion-service
+          image: one00fp/ingestion-service:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "32Mi"
+            limits:
+              cpu: "1000m"
+              memory: "64Mi"
+
+---
+# ==========================================
+# WRITE-SERVICE (Worker 3 - Data)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: write-service
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: write-service
+  template:
+    metadata:
+      labels:
+        app: write-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: data
+      containers:
+        - name: write-service
+          image: one00fp/write-service:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: INFLUXDB_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: INFLUXDB_BUCKET_TELEMETRY
+            - name: INFLUXDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: INFLUXDB_TOKEN
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "32Mi"
+            limits:
+              cpu: "800m"
+              memory: "64Mi"
+
+---
+# ==========================================
+# ANALYZER-SERVICE (Worker 2 - Core)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyzer-service
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analyzer-service
+  template:
+    metadata:
+      labels:
+        app: analyzer-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: core
+      containers:
+        - name: analyzer-service
+          image: one00fp/analyzer-service:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+# ==========================================
+# DECISION-SERVICE (Worker 2 - Core)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decision-service
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: decision-service
+  template:
+    metadata:
+      labels:
+        app: decision-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: core
+      containers:
+        - name: decision-service
+          image: one00fp/decision-service:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 2112
+
+---
+# ==========================================
+# SINK-SERVICE (Worker 3 - Data)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sink-service
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sink-service
+  template:
+    metadata:
+      labels:
+        app: sink-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: data
+      containers:
+        - name: sink-service
+          image: one00fp/sink-service:v1.0
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: INFLUXDB_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: INFLUXDB_BUCKET_MEASUREMENT
+            - name: INFLUXDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: INFLUXDB_TOKEN
+          ports:
+            - containerPort: 50052
+            - containerPort: 2112

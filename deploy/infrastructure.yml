@@ -1,0 +1,265 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: core
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)", "--appendonly", "yes"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: sdcc-namespace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+
+# ==========================================
+# INFLUXDB (Worker Data)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: influxdb
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: influxdb
+  template:
+    metadata:
+      labels:
+        app: influxdb
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: data
+      containers:
+        - name: influxdb
+          image: influxdb:2.7
+          env:
+            - name: DOCKER_INFLUXDB_INIT_MODE
+              value: "setup"
+            - name: DOCKER_INFLUXDB_INIT_USERNAME
+              value: "admin"
+            - name: DOCKER_INFLUXDB_INIT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: INFLUXDB_ADMIN_PASSWORD
+            - name: DOCKER_INFLUXDB_INIT_ORG
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: INFLUXDB_ORGANIZATION
+            - name: DOCKER_INFLUXDB_INIT_BUCKET
+              value: "measurement"
+            - name: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: INFLUXDB_TOKEN
+          ports:
+            - containerPort: 8086
+          volumeMounts:
+            - name: influxdb-data
+              mountPath: /var/lib/influxdb2
+      volumes:
+        - name: influxdb-data
+          persistentVolumeClaim:
+            claimName: influxdb-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: influxdb-pvc
+  namespace: sdcc-namespace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: influxdb-service
+  namespace: sdcc-namespace
+spec:
+  selector:
+    app: influxdb
+  ports:
+    - port: 8086
+      targetPort: 8086
+
+---
+# ==========================================
+# KAFKA (KRaft mode - Worker Core)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: sdcc-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/role: core
+      containers:
+        - name: kafka
+          image: apache/kafka:3.9.0
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka-service:9092,CONTROLLER://kafka-service:9093"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: CLUSTER_ID
+              value: "4L62IdtzT-makk48j9YgAg"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+          ports:
+            - containerPort: 9092
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-service
+  namespace: sdcc-namespace
+spec:
+  selector:
+    app: kafka
+  ports:
+    - port: 9092
+      targetPort: 9092
+
+---
+# ==========================================
+# KAFKA TOPICS INIT JOB
+# ==========================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init-topics
+  namespace: sdcc-namespace
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init-topics
+          image: apache/kafka:3.9.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              BROKER="kafka-service:9092"
+              echo "Waiting for Kafka broker ($BROKER) to be ready..."
+              
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BROKER" --list >/dev/null 2>&1; do
+                echo "Kafka not ready yet, retrying..."
+                sleep 3
+              done
+
+              echo "Kafka is ready. Creating configured topics..."
+
+              /opt/kafka/bin/kafka-topics.sh --create --topic "temperature-topic-sensor" \
+                --bootstrap-server "$BROKER" \
+                --partitions 2 --replication-factor 1 --if-not-exists \
+                --config retention.ms=43200000 \
+                --config segment.bytes=67108864
+
+              /opt/kafka/bin/kafka-topics.sh --create --topic "pressure-topic-sensor" \
+                --bootstrap-server "$BROKER" \
+                --partitions 2 --replication-factor 1 --if-not-exists \
+                --config retention.ms=43200000 \
+                --config segment.bytes=67108864
+
+              /opt/kafka/bin/kafka-topics.sh --create --topic "data-topic-cleaned" \
+                --bootstrap-server "$BROKER" \
+                --partitions 4 --replication-factor 1 --if-not-exists \
+                --config retention.ms=86400000 \
+                --config segment.bytes=134217728
+
+              /opt/kafka/bin/kafka-topics.sh --create --topic "processed-data-topic" \
+                --bootstrap-server "$BROKER" \
+                --partitions 2 --replication-factor 1 --if-not-exists \
+                --config retention.ms=259200000 \
+                --config segment.bytes=134217728
+
+              /opt/kafka/bin/kafka-topics.sh --create --topic "signals-topic" \
+                --bootstrap-server "$BROKER" \
+                --partitions 1 --replication-factor 1 --if-not-exists \
+                --config cleanup.policy=compact \
+                --config min.cleanable.dirty.ratio=0.01 \
+                --config segment.ms=3600000
+
+              echo "All topics successfully created with production-ready settings."

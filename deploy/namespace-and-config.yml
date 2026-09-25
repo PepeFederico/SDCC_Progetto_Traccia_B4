@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sdcc-namespace
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: sdcc-namespace
+data:
+  KAFKA_BROKER: "kafka-service:9092"
+  REDIS_ADDRESS: "redis-service:6379"
+  INFLUXDB_URL: "http://influxdb-service:8086"
+  INFLUXDB_ORGANIZATION: "sdcc_org"
+  INFLUXDB_BUCKET_TELEMETRY: "telemetry"
+  INFLUXDB_BUCKET_MEASUREMENT: "measurement"
+  GENERATOR_GRPC_HOST: "events-generator-service:50051"
+  SINK_GRPC_HOST: "sink-service:50052"
+  GRPC_PORT: "50052"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: sdcc-namespace
+type: Opaque
+stringData:
+  REDIS_PASSWORD: "qwertyuiopo1"
+  INFLUXDB_TOKEN: "my-super-secret-token"
+  INFLUXDB_ADMIN_PASSWORD: "adminpassword123"
