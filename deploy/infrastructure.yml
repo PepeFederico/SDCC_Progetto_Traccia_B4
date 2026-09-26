@@ -183,10 +183,10 @@ spec:
             - containerPort: 9092
           resources:
             requests:
-              cpu: "300m"
+              cpu: "500m"
               memory: "512Mi"
             limits:
-              cpu: "1000m"
+              cpu: "2000m"   # da 1000m a 2000m
               memory: "1Gi"
 ---
 apiVersion: v1

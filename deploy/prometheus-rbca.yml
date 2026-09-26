@@ -1,6 +1,6 @@
 # ==========================================
-# RBAC: permette a Prometheus di scoprire
-# automaticamente i pod cAdvisor su ogni nodo
+# RBAC: permette a Prometheus di scoprire nodi e pod
+# (necessario per lo scraping del cAdvisor integrato nel kubelet)
 # ==========================================
 apiVersion: v1
 kind: ServiceAccount
@@ -14,7 +14,7 @@ metadata:
   name: prometheus
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "services", "endpoints", "pods"]
+    resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"]
     verbs: ["get", "list", "watch"]
   - nonResourceURLs: ["/metrics"]
     verbs: ["get"]
@@ -31,73 +31,3 @@ subjects:
   - kind: ServiceAccount
     name: prometheus
     namespace: sdcc-namespace
-
----
-# ==========================================
-# CADVISOR (DaemonSet: un pod su ogni nodo)
-# ==========================================
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: cadvisor
-  namespace: sdcc-namespace
-spec:
-  selector:
-    matchLabels:
-      app: cadvisor
-  template:
-    metadata:
-      labels:
-        app: cadvisor
-    spec:
-      automountServiceAccountToken: false
-      containers:
-        - name: cadvisor
-          image: gcr.io/cadvisor/cadvisor:v0.49.1
-          args:
-            - "--containerd=/run/k3s/containerd/containerd.sock"
-            - "--docker_only=false"
-          securityContext:
-            privileged: true
-          ports:
-            - containerPort: 8080
-              name: http
-          volumeMounts:
-            - name: rootfs
-              mountPath: /rootfs
-              readOnly: true
-            - name: var-run
-              mountPath: /var/run
-              readOnly: true
-            - name: sys
-              mountPath: /sys
-              readOnly: true
-            - name: containerd
-              mountPath: /var/lib/rancher/k3s/agent/containerd
-              readOnly: true
-            - name: containerd-sock
-              mountPath: /run/k3s/containerd/containerd.sock
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "300m"
-              memory: "256Mi"
-      volumes:
-        - name: rootfs
-          hostPath:
-            path: /
-        - name: var-run
-          hostPath:
-            path: /var/run
-        - name: sys
-          hostPath:
-            path: /sys
-        - name: containerd
-          hostPath:
-            path: /var/lib/rancher/k3s/agent/containerd
-        - name: containerd-sock
-          hostPath:
-            path: /run/k3s/containerd/containerd.sock
-            type: Socket
