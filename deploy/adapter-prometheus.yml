@@ -1,0 +1,14 @@
+prometheus:
+  url: http://prometheus-service.sdcc-namespace.svc.cluster.local
+  port: 9090
+
+rules:
+  default: true
+  external:
+    - seriesQuery: 'kafka_consumergroup_lag'
+      resources:
+        template: "<<.Resource>>"
+      name:
+        matches: "kafka_consumergroup_lag"
+        as: "kafka_consumergroup_lag"
+      metricsQuery: 'sum(avg_over_time(kafka_consumergroup_lag{consumergroup="analyzer-service-group"}[1m]))'

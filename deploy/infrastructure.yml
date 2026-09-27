@@ -148,7 +148,7 @@ spec:
         app: kafka
     spec:
       nodeSelector:
-        node-role.kubernetes.io/role: core
+        node-role.kubernetes.io/role: kafka
       containers:
         - name: kafka
           image: apache/kafka:3.9.0
@@ -178,16 +178,18 @@ spec:
             - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
               value: "1"
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-              value: "true"
+              value: "false"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx2g -Xms1g"
           ports:
             - containerPort: 9092
           resources:
             requests:
-              cpu: "500m"
-              memory: "512Mi"
-            limits:
-              cpu: "2000m"   # da 1000m a 2000m
+              cpu: "1000m"
               memory: "1Gi"
+            limits:
+              cpu: "1000m"   # da 1000m a 2000m
+              memory: "3Gi"
 ---
 apiVersion: v1
 kind: Service
@@ -223,43 +225,59 @@ spec:
             - |
               BROKER="kafka-service:9092"
               echo "Waiting for Kafka broker ($BROKER) to be ready..."
-              
+
               until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BROKER" --list >/dev/null 2>&1; do
                 echo "Kafka not ready yet, retrying..."
                 sleep 3
               done
 
-              echo "Kafka is ready. Creating configured topics..."
+              echo "Kafka is ready. Creating/aligning configured topics..."
 
-              /opt/kafka/bin/kafka-topics.sh --create --topic "temperature-topic-sensor" \
-                --bootstrap-server "$BROKER" \
-                --partitions 2 --replication-factor 1 --if-not-exists \
-                --config retention.ms=43200000 \
-                --config segment.bytes=67108864
+              create_or_align_topic() {
+                topic="$1"
+                partitions="$2"
+                shift 2
 
-              /opt/kafka/bin/kafka-topics.sh --create --topic "pressure-topic-sensor" \
-                --bootstrap-server "$BROKER" \
-                --partitions 2 --replication-factor 1 --if-not-exists \
-                --config retention.ms=43200000 \
-                --config segment.bytes=67108864
+                if /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BROKER" --describe --topic "$topic" >/dev/null 2>&1; then
+                  current=$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BROKER" --describe --topic "$topic" \
+                    | grep -o 'PartitionCount: [0-9]*' | awk '{print $2}')
 
-              /opt/kafka/bin/kafka-topics.sh --create --topic "data-topic-cleaned" \
-                --bootstrap-server "$BROKER" \
-                --partitions 4 --replication-factor 1 --if-not-exists \
-                --config retention.ms=86400000 \
-                --config segment.bytes=134217728
+                  if [ "$current" -lt "$partitions" ]; then
+                    echo "Topic '$topic' esiste con $current partizioni, allineo a $partitions..."
+                    /opt/kafka/bin/kafka-topics.sh --alter --topic "$topic" \
+                      --bootstrap-server "$BROKER" --partitions "$partitions" \
+                      || { echo "ERRORE: impossibile alterare le partizioni di '$topic'"; exit 1; }
+                  else
+                    echo "Topic '$topic' gi\u00e0 con $current partizioni (>= $partitions), nessuna modifica necessaria."
+                  fi
+                else
+                  echo "Creazione topic '$topic' ($partitions partizioni)..."
+                  /opt/kafka/bin/kafka-topics.sh --create --topic "$topic" \
+                    --bootstrap-server "$BROKER" \
+                    --partitions "$partitions" --replication-factor 1 "$@" \
+                    || { echo "ERRORE: creazione di '$topic' fallita"; exit 1; }
+                fi
+              }
 
-              /opt/kafka/bin/kafka-topics.sh --create --topic "processed-data-topic" \
-                --bootstrap-server "$BROKER" \
-                --partitions 2 --replication-factor 1 --if-not-exists \
-                --config retention.ms=259200000 \
-                --config segment.bytes=134217728
+              create_or_align_topic "temperature-topic-sensor" 6 \
+                --config retention.ms=43200000 --config segment.bytes=67108864
 
-              /opt/kafka/bin/kafka-topics.sh --create --topic "signals-topic" \
-                --bootstrap-server "$BROKER" \
-                --partitions 1 --replication-factor 1 --if-not-exists \
-                --config cleanup.policy=compact \
-                --config min.cleanable.dirty.ratio=0.01 \
-                --config segment.ms=3600000
+              create_or_align_topic "pressure-topic-sensor" 6 \
+                --config retention.ms=43200000 --config segment.bytes=67108864
 
-              echo "All topics successfully created with production-ready settings."
+              create_or_align_topic "data-topic-cleaned" 6 \
+                --config retention.ms=86400000 --config segment.bytes=134217728
+
+              create_or_align_topic "processed-data-topic" 4 \
+                --config retention.ms=259200000 --config segment.bytes=134217728
+
+              create_or_align_topic "signals-topic" 1 \
+                --config cleanup.policy=compact --config min.cleanable.dirty.ratio=0.01 --config segment.ms=3600000
+
+              echo ""
+              echo "Verifica finale configurazione topic:"
+              for t in temperature-topic-sensor pressure-topic-sensor data-topic-cleaned processed-data-topic signals-topic; do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BROKER" --describe --topic "$t" | head -1
+              done
+
+              echo "All topics successfully created/aligned with production-ready settings."
