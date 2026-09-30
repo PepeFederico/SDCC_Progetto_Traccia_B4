@@ -143,3 +143,9 @@ Questo rigenera nella stessa directory del `.proto` sia `event_generator.pb.go` 
 
 - **Persistenza Redis disabilitata di default** (`--save "" --appendonly no`): i dati in Redis (parametri di configurazione sensore) vengono persi ad ogni riavvio del container. Il servizio `events-generator` li ripopola al proprio avvio.
 - Tutti i servizi Go (`events-generator`, `front-end`, `ingestion-service`, `analyzer-service`, `decision-service`, `sink-service`, `write-service`) vengono buildati localmente dai rispettivi `Dockerfile`: non è richiesta un'installazione di Go sull'host, la build avviene interamente all'interno di Docker.
+- **Configurazione iniziale di Grafana**: al primo avvio, la dashboard va configurata manualmente seguendo questi passaggi:
+  1. Accedere a Grafana (http://localhost:3000, credenziali `admin`/`admin`)
+  2. Aggiungere una nuova data source di tipo **Prometheus**, impostando come URL `http://prometheus:9090`, quindi **Save & Test**
+  3. Una volta confermata la connessione, andare su **Dashboards → New → Import** e caricare il file [`Dashboard_Locale.json`](./grafana/Dashboard_Locale.json) incluso nel repository
+  4. Aprire i pannelli importati ed eseguire **Run Query** su ciascuno: se la data source è configurata correttamente, i grafici inizieranno a popolarsi con i dati in tempo reale
+
