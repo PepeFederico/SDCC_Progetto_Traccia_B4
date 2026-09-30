@@ -23,18 +23,39 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80
+    - type: External
+      external:
+        metric:
+          name: kafka_consumergroup_lag_by_group
+          selector:
+            matchLabels:
+              consumergroup: "temperature-group"
+        target:
+          type: AverageValue
+          averageValue: "1000"         # Scala quando il lag medio per worker supera i 1.000 eventi
+    - type: External
+      external:
+        metric:
+          name: kafka_consumergroup_lag_by_group
+          selector:
+            matchLabels:
+              consumergroup: "pressure-group"
+        target:
+          type: AverageValue
+          averageValue: "1000"         # Scala quando il lag medio per worker supera i 1.000 eventi
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 120
+      stabilizationWindowSeconds: 180  # Finestra di 3m per prevenire il flapping
       policies:
         - type: Percent
-          value: 50
+          value: 25                    # Riduzione graduale (-25% delle repliche)
           periodSeconds: 60
     scaleUp:
       stabilizationWindowSeconds: 0
+      selectPolicy: Max                # Sceglie la policy che crea più pod per massima reattività
       policies:
         - type: Percent
-          value: 100
+          value: 100                   # Permette il raddoppio delle repliche
           periodSeconds: 15
 
 ---
@@ -66,19 +87,23 @@ spec:
     - type: External
       external:
         metric:
-          name: kafka_consumergroup_lag
+          name: kafka_consumergroup_lag_by_group
+          selector:
+            matchLabels:
+              consumergroup: "analyzer-service-group"
         target:
           type: AverageValue
-          averageValue: "50k"
+          averageValue: "5000"         # Scala quando il lag medio per worker supera i 5.000 eventi
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 120
+      stabilizationWindowSeconds: 180
       policies:
         - type: Percent
-          value: 50
+          value: 25
           periodSeconds: 60
     scaleUp:
       stabilizationWindowSeconds: 0
+      selectPolicy: Max
       policies:
         - type: Percent
           value: 100
@@ -110,15 +135,26 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80
+    - type: External
+      external:
+        metric:
+          name: kafka_consumergroup_lag_by_group
+          selector:
+            matchLabels:
+              consumergroup: "decision-consumer"
+        target:
+          type: AverageValue
+          averageValue: "1000"         # Scala quando il lag medio per worker supera i 1.000 eventi
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 120
+      stabilizationWindowSeconds: 180
       policies:
         - type: Percent
-          value: 50
+          value: 25
           periodSeconds: 60
     scaleUp:
       stabilizationWindowSeconds: 0
+      selectPolicy: Max
       policies:
         - type: Percent
           value: 100

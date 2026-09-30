@@ -3,12 +3,12 @@ prometheus:
   port: 9090
 
 rules:
-  default: true
+  default: false
   external:
-    - seriesQuery: 'kafka_consumergroup_lag'
+    - seriesQuery: 'kafka_consumergroup_lag{consumergroup=~".+"}'
       resources:
-        template: "<<.Resource>>"
+        namespaced: false
       name:
         matches: "kafka_consumergroup_lag"
-        as: "kafka_consumergroup_lag"
-      metricsQuery: 'sum(avg_over_time(kafka_consumergroup_lag{consumergroup="analyzer-service-group"}[1m]))'
+        as: "kafka_consumergroup_lag_by_group"
+      metricsQuery: 'sum(avg_over_time(kafka_consumergroup_lag{<<.LabelMatchers>>}[1m])) by (consumergroup)'

@@ -1,5 +1,5 @@
 # ==========================================
-# EVENTS-GENERATOR (Worker 1 - Load)
+# EVENTS-GENERATOR
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -36,7 +36,7 @@ spec:
 
 ---
 # ==========================================
-# FRONT-END (API GATEWAY) (Master Node)
+# FRONT-END (API GATEWAY)
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -73,7 +73,7 @@ spec:
 
 ---
 # ==========================================
-# INGESTION-SERVICE (Worker 2 - Core)
+# INGESTION-SERVICE
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -109,7 +109,7 @@ spec:
 
 ---
 # ==========================================
-# WRITE-SERVICE (Worker 3 - Data)
+# WRITE-SERVICE
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -156,7 +156,7 @@ spec:
 
 ---
 # ==========================================
-# ANALYZER-SERVICE (Worker 2 - Core)
+# ANALYZER-SERVICE
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -198,7 +198,7 @@ spec:
 
 ---
 # ==========================================
-# DECISION-SERVICE (Worker 2 - Core)
+# DECISION-SERVICE
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
@@ -242,7 +242,7 @@ spec:
 
 ---
 # ==========================================
-# SINK-SERVICE (Worker 3 - Data)
+# SINK-SERVICE
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment

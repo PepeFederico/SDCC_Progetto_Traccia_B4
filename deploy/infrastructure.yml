@@ -268,7 +268,7 @@ spec:
               create_or_align_topic "data-topic-cleaned" 6 \
                 --config retention.ms=86400000 --config segment.bytes=134217728
 
-              create_or_align_topic "processed-data-topic" 4 \
+              create_or_align_topic "processed-data-topic" 6 \
                 --config retention.ms=259200000 --config segment.bytes=134217728
 
               create_or_align_topic "signals-topic" 1 \

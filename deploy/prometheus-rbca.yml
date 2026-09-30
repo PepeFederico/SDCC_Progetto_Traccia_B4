@@ -1,6 +1,5 @@
 # ==========================================
 # RBAC: permette a Prometheus di scoprire nodi e pod
-# (necessario per lo scraping del cAdvisor integrato nel kubelet)
 # ==========================================
 apiVersion: v1
 kind: ServiceAccount

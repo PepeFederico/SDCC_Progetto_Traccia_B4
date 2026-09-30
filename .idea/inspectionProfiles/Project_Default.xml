@@ -6,6 +6,7 @@
         <language minSize="230" name="Go" />
       </Languages>
     </inspection_tool>
+    <inspection_tool class="GoDeferInLoop" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="GoResourceLeak" enabled="true" level="WARNING" enabled_by_default="true">
       <functions>
         <function importPath="github.com/segmentio/kafka-go" name="NewWriter" />
