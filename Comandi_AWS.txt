@@ -1,0 +1,151 @@
+Comandi per definizione cluster AWS.
+
+1)Dopo essere entrati nel Learner LAB, definiamo il Security Group:
+	a)nome gruppo: <NOME_SECURITY_GROUP>
+	b)Definizione regole in entrata:
+		b.1)Regola TCP personalizzata, porta 30300, Origine: mioIP, Grafana
+		b.2)Regola TCP personalizzata, porta 30080, Origine: mioIP, front-end
+		b.3)Regola TCP personalizzata, porta 30051, Origine: mioIP, esecuzione Test/DemoUsage
+		b.4)SSH, Origine: mioIP, Accesso Sicuro
+		b.5)Regola TCP personalizzata, porta 6443, Origine: qualunque IP, k3s (comunicazione cluster)
+		b.6)Tutto il traffico, Origine: cluster-sdcc-progetto, Comunicazione interna tra nodi
+		b.7)Regola TCP personalizzata, porta 30090, Origine: mioIP, Prometheus
+		b.8)Regola UDP personalizzata, porta 8472, Origine: ClusterSicurezza,
+	
+2)Definizione delle chiavi si sicurezza SSH, per accedere alle macchine EC2
+
+3)Parametri delle macchine EC2
+	3.1)AMI: Ubuntu Server 24.04 LTS
+	3.2)Tipo Istanza: t3-medium
+	3.3)Key Pair: <COPPIA_CHIAVI_GENERATA>
+	3.4)Network:
+		Auto-assegnamento dell'IP pubblico, settato ad Enable
+		Security Group: <NOME_SECURITY_GROUP>
+	3.5)Storage:
+		1x30GiB con gp3
+	3.6)Numero istanze da generare pari a 5.
+
+4)Una volta avviate le macchine ed acceduto, bisogna definire il cluster k3s (Kubernetis)
+	4.1)Nodo Master:
+		Eseguire comando per l'installazione k3s in mod.Server:		curl -sfL https://get.k3s.io | sh -
+		Verifica dello stato del master: 				sudo kubectl get nodes
+		Prelevare il token di join:					sudo cat /var/lib/rancher/k3s/server/node-token	
+		Prelevare l'IP privato del Master:				hostname -I (primo della lista 172.31.X.X)
+		Disabilitare UFW:						sudo ufw disable
+		
+	4.2)Nodi Worker:
+		Disabilitare UFW:						sudo ufw disable
+		join delle macchine Worker:					curl -sfL https://get.k3s.io | K3S_URL=https://<IP-PRIVATO-MASTER>:6443 K3S_TOKEN=<TOKEN-SEGRETO> sh -
+		
+	4.3)Se tutto è andato a buon fine dovremmo vedere le macchina associate al Master tramite il comando: sudo kubectl get nodes --> con stato READY
+		
+	# ==========================================
+	# 0. Etichettatura dei Nodi del Cluster K3s
+	# ==========================================
+	# Worker 1: Event Generators (Load)
+	sudo kubectl label node <NOME_NODO_WORKER_1> node-role.kubernetes.io/role=load --overwrite
+
+	# Worker 2: Redis, Ingestion, Analyzer, Decision (Core)
+	sudo kubectl label node <NOME_NODO_WORKER_2> node-role.kubernetes.io/role=core --overwrite
+
+	# Worker 3: InfluxDB, Write-Service, Sink-Service (Data)
+	sudo kubectl label node <NOME_NODO_WORKER_3> node-role.kubernetes.io/role=data --overwrite
+
+	# Worker 4: Kafka (Dedicato)
+	sudo kubectl label node <NOME_NODO_WORKER_4> node-role.kubernetes.io/role=kafka --overwrite
+
+	# Preparazione cartella manifest
+	mkdir -p ~/k3s-manifests
+	cd ~/k3s-manifests
+	
+	Cartella configurazione helm
+	mkdir -p ~/helm-configs
+	cd helm-configs/
+
+	# ==========================================
+	# 1. Deploy Infrastruttura e Applicazioni
+	# ==========================================
+	# 0. importazione di tutti i file .yml nel sistema, copiandoli uno per uno sfruttando nano <nome_file.yml>
+	
+	# 1. Creazione del Namespace e ConfigMap base
+	sudo kubectl apply -f namespace-and-config.yml
+
+	# 2. Deploy dell'Infrastruttura (Kafka, Redis, InfluxDB)
+	sudo kubectl apply -f infrastructure.yml
+
+	# Attendi che Kafka sia pronto prima di proseguire
+	sudo kubectl rollout status deployment/kafka -n sdcc-namespace --timeout=120s
+
+	# 3. Deploy dei Servizi e dei Deployment applicativi
+	sudo kubectl apply -f apps-services.yml
+	sudo kubectl apply -f apps-deployment.yml
+
+	# 4. Patch per esporre il Generatore di Eventi allo script Go locale (Porta 30051)
+	sudo kubectl patch svc events-generator-service -n sdcc-namespace \
+	  -p '{"spec": {"type": "NodePort", "ports": [{"port": 50051, "targetPort": 50051, "nodePort": 30051}]}}'
+
+	# 5. Monitoraggio base (Prometheus, Grafana, Kafka-Exporter)
+	sudo kubectl apply -f prometheus-rbca.yml
+	sudo kubectl apply -f monitoring.yml
+
+	# ==========================================
+	# 2. Setup Helm & Prometheus Adapter
+	# ==========================================
+	SPOSTARSI NELLA CARTELLA helm-config
+	copiare il file adapter-prometheus.yml nella cartella creandolo con nano
+	
+	curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+	chmod 700 get_helm.sh
+	sudo ./get_helm.sh
+
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm repo update
+
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm install prometheus-adapter prometheus-community/prometheus-adapter --namespace sdcc-namespace -f ~/helm-configs/adaptive-prometheus.yml
+
+	# Attendi l'avvio del pod dell'adapter
+	sudo kubectl rollout status deployment/prometheus-adapter -n sdcc-namespace --timeout=90s
+
+	# 3. Applicazione delle regole HPA (Ingestion, Analyzer, Decision)
+	sudo kubectl apply -f hpa.yml
+
+	# ==========================================
+	# 3. Verifiche di Salute e Funzionalità
+	# ==========================================
+	# 1. Verifica dello stato dei Pod (Tutti Running o Completed)
+	sudo kubectl get pods -n sdcc-namespace
+
+	# 2. Verifica che l'API Custom Metrics risponda correttamente con il Lag
+	sudo kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1/namespaces/sdcc-namespace/kafka_consumergroup_lag_by_group"
+
+	# 3. Controllo dello stato degli HPA (La colonna TARGETS deve mostrare i valori numerici)
+	sudo kubectl get hpa -n sdcc-namespace
+	
+	# ==========================================
+	# 4. Restart dell'infrastruttura
+	# ==========================================
+	sudo kubectl scale deployments --all --replicas=0 -n sdcc-namespace
+	
+	sudo kubectl delete pvc --all -n sdcc-namespace
+	
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm uninstall prometheus-adapter -n sdcc-namespace release "prometheus-adapter" uninstalled
+	
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f ~/k3s-manifests/ -n sdcc-namespace
+	
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get pods -n sdcc-namespace -l app=kafka (controllo di kafka)
+	
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm install prometheus-adapter prometheus-community/prometheus-adapter --namespace sdcc-namespace -f ~/helm-configs/adaptive-prometheus.yml
+	
+	Restart di tutti i servizi:
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment ingestion-service -n sdcc-namespace
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment analyzer-service -n sdcc-namespace
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment decision-service -n sdcc-namespace
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment sink-service -n sdcc-namespace
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment write-service -n sdcc-namespace
+	
+	
+	Per l'esecuzione del test/DemoUsage da Go, eseguire: go run <test/demoUsage.go> -addr <IP_MAster>:30051
+
+	
+	
+
