@@ -124,26 +124,26 @@ func main() {
 	// PIANIFICAZIONE TEST:
 	stages := []stage{
 		// --- RAMPA INIZIALE FINO A 3.000 SENSORI ---
-		{name: "Fase 1: Baseline (50 sensori @ 1s)", action: ActionAdd, sensorCount: 50, interval: 1 * time.Second, holdTime: 20 * time.Second, concurrency: 4},
+		{name: "Fase 1: Riferimento iniziale (50 sensori @ 1s)", action: ActionAdd, sensorCount: 50, interval: 1 * time.Second, holdTime: 20 * time.Second, concurrency: 4},
 		{name: "Fase 2: Warm-up (200 sensori @ 1s)", action: ActionAdd, sensorCount: 150, interval: 1 * time.Second, holdTime: 20 * time.Second, concurrency: 8},
-		{name: "Fase 3: Moderate (500 sensori @ 500ms)", action: ActionAdd, sensorCount: 300, interval: 500 * time.Millisecond, holdTime: 30 * time.Second, concurrency: 16},
-		{name: "Fase 4: Heavy (1.5k sensori @ 500ms)", action: ActionAdd, sensorCount: 1000, interval: 500 * time.Millisecond, holdTime: 45 * time.Second, concurrency: 24},
-		{name: "Fase 5: Target Threshold (3k sensori @ 1s)", action: ActionAdd, sensorCount: 1500, interval: 1 * time.Second, holdTime: 60 * time.Second, concurrency: 32},
+		{name: "Fase 3: Carico Moderato (500 sensori @ 500ms)", action: ActionAdd, sensorCount: 300, interval: 500 * time.Millisecond, holdTime: 30 * time.Second, concurrency: 16},
+		{name: "Fase 4: Carico Elevato (1.5k sensori @ 500ms)", action: ActionAdd, sensorCount: 1000, interval: 500 * time.Millisecond, holdTime: 45 * time.Second, concurrency: 24},
+		{name: "Fase 5: 1° Soglia Obiettivo (3k sensori @ 1s)", action: ActionAdd, sensorCount: 1500, interval: 1 * time.Second, holdTime: 60 * time.Second, concurrency: 32},
 
 		// --- ARRESTO MASSIVO (Stoppa 2.000 sensori sui 3.000 attivi) ---
-		{name: "Fase 6: Chaos Intermedio (Stop 2k sensori per testare Scale-Down)", action: ActionStop, sensorCount: 2000, holdTime: 15 * time.Second, concurrency: 32},
+		{name: "Fase 6: Arresto Massivo (Stop 2k sensori per testare Scale-Down)", action: ActionStop, sensorCount: 2000, holdTime: 15 * time.Second, concurrency: 32},
 
 		// --- OSSERVAZIONE SCALE-DOWN ---
-		{name: "Fase 7: Observation & HPA Scale-Down", action: ActionHold, holdTime: 200 * time.Second},
+		{name: "Fase 7: Osservazione del Sistema", action: ActionHold, holdTime: 200 * time.Second},
 
 		// --- SECONDO PICCO FINO A 10.000 SENSORI ---
-		{name: "Fase 8: Resurgence & High Load (5k sensori @ 500ms)", action: ActionAdd, sensorCount: 4000, interval: 500 * time.Millisecond, holdTime: 60 * time.Second, concurrency: 48},
-		{name: "Fase 9: Near-Peak (7.5k sensori @ 500ms)", action: ActionAdd, sensorCount: 2500, interval: 500 * time.Millisecond, holdTime: 60 * time.Second, concurrency: 64},
-		{name: "Fase 10: Sustained Peak (10k sensori @ 500ms)", action: ActionAdd, sensorCount: 2500, interval: 500 * time.Millisecond, holdTime: 120 * time.Second, concurrency: 80},
+		{name: "Fase 8: Carico Massivo (5k sensori @ 500ms)", action: ActionAdd, sensorCount: 4000, interval: 500 * time.Millisecond, holdTime: 60 * time.Second, concurrency: 48},
+		{name: "Fase 9: Avvicinamento al Picco (7.5k sensori @ 500ms)", action: ActionAdd, sensorCount: 2500, interval: 500 * time.Millisecond, holdTime: 60 * time.Second, concurrency: 64},
+		{name: "Fase 10: 2°Soglia Obiettivo (10k sensori @ 500ms)", action: ActionAdd, sensorCount: 2500, interval: 500 * time.Millisecond, holdTime: 120 * time.Second, concurrency: 80},
 
 		// --- ARRESTO FINALE SOTTO PICCO ---
-		{name: "Fase 11: Final Chaos (Massive Stop - 5k sensori)", action: ActionStop, sensorCount: 5000, holdTime: 30 * time.Second, concurrency: 48},
-		{name: "Fase 12: Final Self-Healing & Recovery", action: ActionHold, holdTime: 180 * time.Second},
+		{name: "Fase 11: Secondo Arresto Massivo (5k sensori)", action: ActionStop, sensorCount: 5000, holdTime: 30 * time.Second, concurrency: 48},
+		{name: "Fase 12: Attesa Recovery Finale", action: ActionHold, holdTime: 180 * time.Second},
 	}
 
 	var totalCreated int64 = 0

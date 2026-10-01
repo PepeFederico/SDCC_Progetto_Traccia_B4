@@ -19,13 +19,13 @@ Comandi per definizione cluster AWS.
 	3.2)Tipo Istanza: t3-medium
 	3.3)Key Pair: <COPPIA_CHIAVI_GENERATA>
 	3.4)Network:
-		Auto-assegnamento dell'IP pubblico, settato ad Enable
+		Auto-assegnamento dell'IP pubblico, settato a Enable
 		Security Group: <NOME_SECURITY_GROUP>
 	3.5)Storage:
 		1x30GiB con gp3
 	3.6)Numero istanze da generare pari a 5.
 
-4)Una volta avviate le macchine ed acceduto, bisogna definire il cluster k3s (Kubernetis)
+4)Una volta avviate le macchine e acceduto, bisogna definire il cluster k3s (Kubernetis)
 	4.1)Nodo Master:
 		Eseguire comando per l'installazione k3s in mod.Server:		curl -sfL https://get.k3s.io | sh -
 		Verifica dello stato del master: 				sudo kubectl get nodes
@@ -127,24 +127,34 @@ Comandi per definizione cluster AWS.
 	sudo kubectl scale deployments --all --replicas=0 -n sdcc-namespace
 	
 	sudo kubectl delete pvc --all -n sdcc-namespace
+
+	sudo kubectl delete job kafka-init-topics -n sdcc-namespace --ignore-not-found
 	
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm uninstall prometheus-adapter -n sdcc-namespace release "prometheus-adapter" uninstalled
+	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm uninstall prometheus-adapter -n sdcc-namespace --ignore-not-found || true
 	
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f ~/k3s-manifests/ -n sdcc-namespace
+	sudo kubectl apply -f ~/k3s-manifests/ -n sdcc-namespace
 	
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get pods -n sdcc-namespace -l app=kafka (controllo di kafka)
+	sudo kubectl get pods -n sdcc-namespace -l app=kafka (controllo di kafka)
 	
 	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm install prometheus-adapter prometheus-community/prometheus-adapter --namespace sdcc-namespace -f ~/helm-configs/adaptive-prometheus.yml
 	
 	Restart di tutti i servizi:
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment ingestion-service -n sdcc-namespace
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment analyzer-service -n sdcc-namespace
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment decision-service -n sdcc-namespace
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment sink-service -n sdcc-namespace
-	sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout restart deployment write-service -n sdcc-namespace
+	sudo kubectl rollout restart deployment events-generator -n sdcc-namespace
+	sudo kubectl rollout restart deployment ingestion-service -n sdcc-namespace
+	sudo kubectl rollout restart deployment analyzer-service -n sdcc-namespace
+	sudo kubectl rollout restart deployment decision-service -n sdcc-namespace
+	sudo kubectl rollout restart deployment sink-service -n sdcc-namespace
+	sudo kubectl rollout restart deployment write-service -n sdcc-namespace
+
+	Riapplicare i seguenti file:
+	sudo kubectl apply -f ~/k3s-manifests/prometheus-rbca.yml
+	sudo kubectl apply -f ~/k3s-manifests/monitoring.yml
+
+	Controllo del corretto funzionamento:
+	sudo kubectl get hpa -n sdcc-namespace -w
+
 	
-	
-	Per l'esecuzione del test/DemoUsage da Go, eseguire: go run <test/demoUsage.go> -addr <IP_MAster>:30051
+	Per l'esecuzione del test/DemoUsage da Go, eseguire: go run <test/demoUsage.go> -addr <IP_Master>:30051
 
 	
 	
