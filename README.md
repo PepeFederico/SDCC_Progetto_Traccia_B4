@@ -1,4 +1,4 @@
-# Progetto SDCC -- Traccia B4 -- Applicazioen a microservizi -- A.A. 2025/2026
+# Progetto SDCC -- Traccia B4 -- Applicazione a microservizi -- A.A. 2025/2026
 
 Sistema IoT a microservizi per l'ingestion, l'elaborazione e l'analisi in tempo reale di dati sensoristici, basato su un'architettura event-driven con Apache Kafka, Redis, InfluxDB e uno stack di monitoraggio Prometheus/Grafana.
 
