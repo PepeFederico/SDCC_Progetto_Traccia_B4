@@ -101,7 +101,7 @@ docker compose down
 
 Il progetto usa gRPC per la comunicazione tra `front-end`/`events-generator` (e potenzialmente altri servizi). Il codice Go generato dai file `.proto` **è già incluso nel repository**: la rigenerazione è necessaria solo se si modifica una definizione `.proto` esistente o se ne aggiunge una nuova.
 
-### Installazione degli strumenti richiesti (una tantum)
+### Installazione degli strumenti richiesti
 
 ```bash
 # Compilatore Protocol Buffers
